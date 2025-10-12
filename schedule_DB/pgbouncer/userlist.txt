@@ -1,0 +1,1 @@
+"schedule_user" "md5$(echo -n 's3cret_passwordschedule_user' | md5sum | awk '{print $1}')"
