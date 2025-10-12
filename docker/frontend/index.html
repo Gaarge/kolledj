@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Расписание колледжа</title>
+  <style>
+    body{margin:0;background:#0b0e14;color:#e5e7eb;font:16px/1.45 system-ui,Segoe UI,Roboto,Inter,Arial}
+    .wrap{max-width:980px;margin:0 auto;padding:24px}
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    .month{font-size:28px;font-weight:700}
+    .week{display:flex;gap:8px;align-items:center;background:#131823;border:1px solid #1f2937;border-radius:12px;padding:6px}
+    .week button{border:0;background:transparent;color:#e5e7eb;width:34px;height:34px;border-radius:8px;cursor:pointer}
+    .week .label{padding:4px 10px;border-radius:8px;background:#0e1422;border:1px solid #1f2937}
+    .grid{margin-top:14px;display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
+    .day{background:#131823;border:1px solid #1f2937;border-radius:12px;padding:10px;min-height:72px;cursor:pointer}
+    .day.selected{outline:2px solid #4f46e5;outline-offset:2px}
+    .muted{color:#6b7280} .legend{color:#6b7280;font-size:12px}
+    .sched{margin-top:16px;background:#131823;border:1px solid #1f2937;border-radius:12px;overflow:hidden}
+    .sched .head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#0e1422;border-bottom:1px solid #1f2937}
+    .item{display:grid;grid-template-columns:84px 1fr 180px 160px;gap:12px;padding:12px 14px;border-bottom:1px solid #1f2937}
+    .item:last-child{border-bottom:0} .mut{color:#6b7280}
+    @media (max-width:860px){.item{grid-template-columns:84px 1fr}.item .room,.item .teacher{display:none}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="month" id="month">—</div>
+    <div class="week">
+      <button id="prev">←</button>
+      <div class="label" id="label">Неделя 1 / 16</div>
+      <button id="next">→</button>
+    </div>
+  </header>
+  <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
+    <div><small class="mut">Группа</small><br><input id="group" value="И-22"></div>
+    <div><small class="mut">Начало семестра</small><br><input id="start" type="date"></div>
+    <div><small class="mut">Недель</small><br>
+      <select id="weeks"><option>16</option><option>17</option><option>18</option></select>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="sched">
+    <div class="head"><div><b>Расписание</b> на <span id="sel">—</span> для группы <span id="gsel">—</span></div><small id="status" class="mut">Готово</small></div>
+    <div id="items"></div>
+  </section>
+</div>
+
+<script>
+const MONTHS=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+const DOW=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const pad=n=>String(n).padStart(2,'0');
+const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const ruMonth=d=>MONTHS[d.getMonth()].replace(/^./,c=>c.toUpperCase());
+const startOfWeekMon=d=>{const x=new Date(d);x.setHours(0,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x;};
+const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);x.setHours(0,0,0,0);return x;};
+const diffDays=(a,b)=>Math.round((a-b)/86400000);
+const weekOfSem=(date, start)=>Math.floor(diffDays(startOfWeekMon(date), startOfWeekMon(start))/7)+1;
+const H=$id=>document.getElementById($id);
+
+const state={start:new Date(new Date().getFullYear(),8,1), weeks:16, week:1, sel:null, gi:'И-22', cache:new Map()};
+H('start').value = `${state.start.getFullYear()}-${pad(state.start.getMonth()+1)}-${pad(state.start.getDate())}`;
+H('weeks').value = String(state.weeks);
+H('group').value = state.gi;
+
+['change','input'].forEach(ev=>H('group').addEventListener(ev,()=>{state.gi=H('group').value.trim(); renderSched();}));
+H('start').addEventListener('change',()=>{const d=new Date(H('start').value); if(String(d)!=='Invalid Date'){state.start=d; state.week=Math.max(1,Math.min(state.weeks,weekOfSem(state.sel||new Date(),state.start))); renderWeek();}});
+H('weeks').addEventListener('change',()=>{state.weeks=Number(H('weeks').value); state.week=Math.max(1,Math.min(state.weeks,state.week)); renderWeek();});
+
+H('prev').onclick=()=>{state.week=Math.max(1,state.week-1); renderWeek();};
+H('next').onclick=()=>{state.week=Math.min(state.weeks,state.week+1); renderWeek();};
+
+function renderWeek(){
+  const w0=startOfWeekMon(state.start);
+  const ws=addDays(w0,(state.week-1)*7);
+  const grid=H('grid'); grid.innerHTML='';
+  for(let i=0;i<7;i++){
+    const d=addDays(ws,i);
+    const div=document.createElement('div'); div.className='day'; div.tabIndex=0;
+    const sel=state.sel && iso(d)===iso(state.sel);
+    if(sel) div.classList.add('selected');
+    if((state.sel||d).getMonth()!==d.getMonth()) div.classList.add('muted');
+    div.innerHTML=`<div class="mut">${DOW[i]}</div><div style="font-weight:700;font-size:18px">${d.getDate()}</div>`;
+    div.onclick=()=>{state.sel=d; updateHeader(); highlight(); renderSched();};
+    div.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')div.onclick();};
+    div.dataset.date=iso(d);
+    grid.appendChild(div);
+  }
+  if(!state.sel){ const t=new Date(); state.sel=addDays(ws,Math.min(6,((t.getDay()+6)%7))); }
+  updateHeader(); highlight(); renderSched();
+  H('label').textContent = `Неделя ${state.week} / ${state.weeks}`;
+}
+function highlight(){
+  document.querySelectorAll('.day').forEach(el=>el.classList.remove('selected'));
+  const el=[...document.querySelectorAll('.day')].find(x=>x.dataset.date===iso(state.sel));
+  if(el) el.classList.add('selected');
+}
+function updateHeader(){
+  H('month').textContent = ruMonth(state.sel);
+  H('sel').textContent = new Intl.DateTimeFormat('ru-RU',{dateStyle:'full'}).format(state.sel);
+  H('gsel').textContent = state.gi || '—';
+}
+async function renderSched(){
+  const items=H('items'), key=`${state.gi}:${iso(state.sel)}`;
+  if(state.cache.has(key)){ items.innerHTML=state.cache.get(key); H('status').textContent='Кеш'; return; }
+  H('status').textContent='Загрузка…';
+  try{
+    const res = await fetch(`/api/schedule?group=${encodeURIComponent(state.gi)}&date=${iso(state.sel)}`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    const html = data.length ? data.map(x=>`
+      <div class="item">
+        <div><b>${x.time_start}–${x.time_end}</b><div class="legend">пара ${x.pair_number}</div></div>
+        <div><b>${x.subject}</b><div class="legend">${x.session_type||''}</div></div>
+        <div class="room mut">Аудитория: ${x.room||'—'}</div>
+        <div class="teacher mut">Преподаватель: ${x.teacher||'—'}</div>
+      </div>
+    `).join('') : '<div style="padding:16px" class="mut">Нет занятий</div>';
+    items.innerHTML=html; state.cache.set(key, html); H('status').textContent='Готово';
+  }catch(e){ items.innerHTML='<div style="padding:16px;color:#ef4444">Ошибка загрузки расписания. '+e.message+'</div>'; H('status').textContent='Ошибка'; }
+}
+(function(){ const t=new Date(); state.week=Math.max(1,Math.min(state.weeks,weekOfSem(t,state.start))); state.sel=t; renderWeek(); })();
+</script>
+</body>
+</html>

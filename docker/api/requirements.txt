@@ -1,6 +1,4 @@
 fastapi
 uvicorn[standard]
 asyncpg
-python-dotenv
-aioredis
 pydantic

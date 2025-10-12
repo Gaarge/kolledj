@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: pgdata }
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: pg-init-sql }
+data:
+  00_create_schema.sql: |
+    CREATE TABLE IF NOT EXISTS schedule (
+      id SERIAL PRIMARY KEY,
+      date DATE NOT NULL,
+      pair_number SMALLINT NOT NULL,
+      time_start TIME NOT NULL,
+      time_end TIME NOT NULL,
+      subject TEXT NOT NULL,
+      session_type VARCHAR(16) NOT NULL,
+      room VARCHAR(32),
+      teacher VARCHAR(128),
+      group_name VARCHAR(32) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      UNIQUE (group_name, date, pair_number)
+    );
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: postgres }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+      - name: db
+        image: postgres:15
+        env:
+          - { name: POSTGRES_USER, value: "schedule_user" }
+          - { name: POSTGRES_PASSWORD, value: "schedule_pass" }
+          - { name: POSTGRES_DB, value: "schedule_db" }
+        ports: [ { containerPort: 5432 } ]
+        volumeMounts:
+          - { name: data, mountPath: /var/lib/postgresql/data }
+          - { name: init-sql, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: pgdata } }
+        - { name: init-sql, configMap: { name: pg-init-sql } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: postgres }
+spec:
+  selector: { app: postgres }
+  ports: [ { port: 5432, targetPort: 5432 } ]
