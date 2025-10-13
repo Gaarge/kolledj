@@ -10,44 +10,54 @@ kind: ConfigMap
 metadata: { name: pg-init-sql }
 data:
   00_create_schema.sql: |
-    CREATE TABLE IF NOT EXISTS schedule (
+    CREATE TABLE IF NOT EXISTS weekday_schedule (
       id SERIAL PRIMARY KEY,
-      date DATE NOT NULL,
-      pair_number SMALLINT NOT NULL,
+      weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+      pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
       time_start TIME NOT NULL,
-      time_end TIME NOT NULL,
-      subject TEXT NOT NULL,
-      session_type VARCHAR(16) NOT NULL,
-      room VARCHAR(32),
-      teacher VARCHAR(128),
+      time_end   TIME NOT NULL,
+      subject    TEXT,
+      session_type VARCHAR(16),
+      room       VARCHAR(32),
+      teacher    TEXT,
       group_name VARCHAR(32) NOT NULL,
       created_at TIMESTAMPTZ DEFAULT now(),
-      UNIQUE (group_name, date, pair_number)
+      UNIQUE (group_name, weekday, pair_number)
     );
+    CREATE INDEX IF NOT EXISTS idx_weekday_schedule_group_day
+      ON weekday_schedule (group_name, weekday);
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: postgres }
 spec:
-  replicas: 1
   selector: { matchLabels: { app: postgres } }
+  replicas: 1
   template:
     metadata: { labels: { app: postgres } }
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: postgres:15
-        env:
-          - { name: POSTGRES_USER, value: "schedule_user" }
-          - { name: POSTGRES_PASSWORD, value: "schedule_pass" }
-          - { name: POSTGRES_DB, value: "schedule_db" }
+        image: kol/postgres-import:local
         ports: [ { containerPort: 5432 } ]
+        env:
+          - { name: POSTGRES_USER,     value: "schedule_user" }
+          - { name: POSTGRES_PASSWORD, value: "schedule_pass" }
+          - { name: POSTGRES_DB,       value: "schedule_db" }
+          - { name: EXCEL_PATH,        value: "/app/excel/schedule.xlsx" }
         volumeMounts:
-          - { name: data, mountPath: /var/lib/postgresql/data }
+          - { name: data,     mountPath: /var/lib/postgresql/data }
           - { name: init-sql, mountPath: /docker-entrypoint-initdb.d }
+        lifecycle:
+          postStart:
+            exec:
+               command: ["sh", "-lc", "/opt/venv/bin/python /app/import_from_excel.py || true; echo '[postStart] import finished.'"]
       volumes:
-        - { name: data, persistentVolumeClaim: { claimName: pgdata } }
-        - { name: init-sql, configMap: { name: pg-init-sql } }
+        - name: data
+          persistentVolumeClaim: { claimName: pgdata }
+        - name: init-sql
+          configMap: { name: pg-init-sql }
 ---
 apiVersion: v1
 kind: Service
