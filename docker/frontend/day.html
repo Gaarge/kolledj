@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Расписание на день</title>
+  <style>
+    :root{
+      --bg:#0b1e3f; --fg:#fff; --muted:#d0dbff; --card:#5a5c7a; --card2:#515376;
+      --stroke:#bfc8ff; --accent:#7fb3ff; --good:#4ade80; --dot:#ffd24d;
+      --barTrack:#15ff92; --barFill:#ff8a00; --notice:#13274b;
+    }
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0b1e3f 0%,#0a1a33 100%);color:var(--fg);
+         font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+    .shell{max-width:460px;margin:0 auto;min-height:100%;position:relative;padding-bottom:2rem}
+    .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+            padding:.6rem 1rem .4rem;background:linear-gradient(180deg,#0b1e3fee,#0b1e3fcc);
+            border-bottom:1px solid #ffffff22;backdrop-filter:blur(6px) saturate(120%)}
+    .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem}
+    .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85}
+    .tab.sel{background:#ffffff22;opacity:1}
+    .grow{flex:1}
+    .grp{display:inline-flex;gap:.4rem;align-items:center}
+    .grp label{font-weight:700;opacity:.85}
+    input[type="text"]{
+      appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
+      padding:.35rem .6rem;min-width:12rem;outline:none;
+    }
+    input[type="text"]::placeholder{color:#d0dbff88}
+    h1{font-weight:800;letter-spacing:.3px;margin:.25rem 0 .5rem;font-size:1.35rem}
+
+    .monthbar{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:0 .75rem .5rem}
+    .navbtn{background:transparent;border:none;color:var(--fg);font-size:1.25rem;cursor:pointer;padding:.35rem .5rem;border-radius:.5rem;line-height:1}
+    .navbtn[disabled]{opacity:.4;cursor:not-allowed}
+    .navbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .monthtxt{opacity:.9}
+    .weekstrip{display:flex;gap:.75rem;align-items:flex-end;justify-content:space-between;padding:.35rem .75rem .6rem;border-bottom:1px solid #ffffff22}
+    .dw{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:38px}
+    .d{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:transparent;border:1px solid #ffffff33;color:var(--fg);font-weight:700}
+    .d.today{border-color:var(--accent)} .d.sel{background:#ffffff22;border-color:#ffffff55}
+    .dots{display:flex;gap:3px;flex-wrap:wrap;justify-content:center;min-height:6px}
+    .dot{width:6px;height:6px;border-radius:50%;background:var(--dot)}
+
+    .list{padding:.75rem;display:flex;flex-direction:column;gap:.75rem}
+    .slot{background:var(--card);border-radius:14px;border:1px solid #ffffff22;overflow:hidden}
+    .slot.alt{background:var(--card2)}
+    .slot .inner{padding:.75rem .9rem}
+    .head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;border-bottom:1px solid #ffffff33;padding-bottom:.4rem;margin-bottom:.5rem}
+    .subj{display:flex;align-items:center;gap:.5rem}
+    .led{width:10px;height:10px;border-radius:50%;background:var(--good);box-shadow:0 0 6px #13ff7a}
+    .name{font-size:1.35rem;font-weight:800;letter-spacing:.2px}
+    .pairNum{opacity:.9;font-weight:700;margin-left:.25rem}
+    .time{opacity:.8;font-weight:700}
+    .row{opacity:.9;margin:.35rem 0} .row strong{opacity:.9} .row .muted{opacity:.75}
+    .breakWrap{padding:.5rem .9rem .9rem}
+    .bar{position:relative;height:12px;border-radius:8px;border:2px solid var(--barTrack);background:transparent;overflow:hidden}
+    .fill{position:absolute;left:0;top:0;height:100%;width:0%;background:var(--barFill);transition:width .5s linear}
+    .mins{position:absolute;right:6px;top:-22px;font-weight:800;font-size:.75rem;background:#0e2549;padding:.15rem .35rem;border-radius:.35rem;border:1px solid #ffffff33}
+    .bar.hidden{opacity:.35}
+    .notice{position:sticky;top:3.25rem;margin:.5rem .75rem 0;padding:.6rem .75rem;border-radius:.6rem;border:1px solid #ffffff2a;background:var(--notice);display:none}
+    .notice.show{display:block}
+    @media (min-width:720px){.shell{max-width:880px} h1{font-size:1.6rem} .weekstrip{justify-content:flex-start;gap:1rem}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="tabs">
+        <a class="tab sel" href="/day.html">День</a>
+        <a class="tab" href="/week.html">Неделя</a>
+      </div>
+      <div class="grow"></div>
+      <div class="grp">
+        <label for="groupInput">Группа</label>
+        <input id="groupInput" type="text" placeholder="например, ОИ21-09" list="groupsList" />
+        <datalist id="groupsList"></datalist>
+      </div>
+    </div>
+
+    <div class="monthbar">
+      <button class="navbtn" id="prevWeek" aria-label="Предыдущая неделя">⟵</button>
+      <div class="monthtxt" id="monthTitle"></div>
+      <button class="navbtn" id="nextWeek" aria-label="Следующая неделя">⟶</button>
+    </div>
+
+    <div class="weekstrip" id="weekStrip" aria-label="Неделя"></div>
+
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <h1 style="padding:0 .75rem">Расписание на день</h1>
+    <div class="list" id="pairsList"></div>
+  </div>
+
+  <script>
+    // ==== Константы семестра ====
+    const SEM_START = new Date(2025,8,1); // 1.09.2025
+    const SEM_WEEKS = 16;
+    const SEM_END   = new Date(+SEM_START + (SEM_WEEKS*7-1)*24*3600*1000);
+
+    const PAIRS = [
+      {num:1,start:"09:00",end:"10:30"},
+      {num:2,start:"10:40",end:"12:10"},
+      {num:3,start:"12:40",end:"14:10"},
+      {num:4,start:"14:20",end:"15:50"},
+      {num:5,start:"16:20",end:"17:50"},
+    ];
+
+    // ==== утилиты дат ====
+    const pad = n => String(n).padStart(2,'0');
+    const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const mondayOf = date => { const d=new Date(date); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd); d.setHours(0,0,0,0); return d; };
+    const sameDay = (a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+    const fmtMonthRu = d => ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"][d.getMonth()] + " " + d.getFullYear();
+    function semWeekIndex(date){ const diff = Math.floor((mondayOf(date)-mondayOf(SEM_START))/(7*24*3600*1000)); return diff+1; }
+
+    // ==== элементы ====
+    const weekStripEl = document.getElementById('weekStrip');
+    const listEl      = document.getElementById('pairsList');
+    const monthTitle  = document.getElementById('monthTitle');
+    const noticeEl    = document.getElementById('notice');
+    const groupInput  = document.getElementById('groupInput');
+    const groupsList  = document.getElementById('groupsList');
+    const prevBtn     = document.getElementById('prevWeek');
+    const nextBtn     = document.getElementById('nextWeek');
+
+    // ==== состояние ====
+    let selectedDay = new Date();
+    let weekStart   = mondayOf(selectedDay);
+    let currentGroup = localStorage.getItem('group') || "";
+
+    // ==== API ====
+    async function fetchGroupsToDatalist(){
+      try{
+        const r = await fetch('/api/groups',{cache:'no-store'});
+        if(!r.ok) return;
+        const data = await r.json();
+        const arr  = Array.isArray(data) ? data : (data.groups || []);
+        groupsList.innerHTML = arr.map(g=>`<option value="${g}"/>`).join('');
+      }catch{}
+    }
+    async function fetchDay(group, date){
+      if(!group) return [];
+      const r = await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`, {cache:'no-store'});
+      if(!r.ok) return [];
+      return await r.json();
+    }
+
+    function notify(msg){ noticeEl.textContent = msg; noticeEl.classList.add('show'); setTimeout(()=>noticeEl.classList.remove('show'), 3000); }
+
+    function ensureFive(items){
+      const map={}; (items||[]).forEach(it=>{ const p=it.pair_number??it.pair; if(p) map[p]=it; });
+      const out=[];
+      for(let i=1;i<=5;i++){
+        const base=map[i]||{}, t=PAIRS[i-1];
+        out.push({ pair:i, time_start:base.time_start||t.start, time_end:base.time_end||t.end, subject:base.subject||"", room:base.room||"", teacher:base.teacher||"" });
+      }
+      return out;
+    }
+
+    function renderPairs(rows){
+      listEl.innerHTML="";
+      rows.forEach((it,idx)=>{
+        const slot=document.createElement('div'); slot.className='slot'+(idx%2?' alt':'');
+        const inner=document.createElement('div'); inner.className='inner';
+        const head=document.createElement('div'); head.className='head';
+        head.innerHTML = `
+          <div class="subj"><span class="led"></span><span class="name">${it.subject||'—'}</span><span class="pairNum">${it.pair} пара</span></div>
+          <div class="time">${it.time_start} – ${it.time_end}</div>`;
+        inner.appendChild(head);
+        inner.insertAdjacentHTML('beforeend', `<div class="row"><strong>Каб</strong> <span class="muted">${it.room||'—'}</span></div>`);
+        inner.insertAdjacentHTML('beforeend', `<div class="row"><strong>Преподаватель</strong> <span class="muted">${it.teacher||'—'}</span></div>`);
+        if(idx<4) inner.insertAdjacentHTML('beforeend', `<div class="breakWrap"><div class="bar hidden"><div class="fill"></div><div class="mins"></div></div></div>`);
+        slot.appendChild(inner); listEl.appendChild(slot);
+      });
+    }
+
+    async function renderWeekStrip(){
+      weekStripEl.innerHTML="";
+      const today=new Date();
+      monthTitle.textContent = `${fmtMonthRu(selectedDay)} • ${semWeekIndex(selectedDay)} неделя`;
+      prevBtn.disabled = semWeekIndex(weekStart) <= 1;
+      nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
+
+      for(let i=0;i<7;i++){
+        const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
+        const wrap=document.createElement('div'); wrap.className='dw';
+        const btn=document.createElement('button'); btn.className='d'+(sameDay(d,today)?' today':'')+(sameDay(d,selectedDay)?' sel':''); btn.textContent=d.getDate();
+        btn.onclick = async ()=>{ selectedDay=d; await updateDay(); };
+        const dots=document.createElement('div'); dots.className='dots';
+        wrap.appendChild(btn); wrap.appendChild(dots); weekStripEl.appendChild(wrap);
+        // точки по количеству занятий (если группа введена)
+        if(currentGroup){
+          try{ const arr=await fetchDay(currentGroup,d); dots.innerHTML=''; for(let j=0;j<(arr?.length||0);j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>'); }catch{}
+        }
+      }
+    }
+
+    async function updateDay(){
+      await renderWeekStrip();
+      const items = await fetchDay(currentGroup, selectedDay);
+      renderPairs(ensureFive(items));
+    }
+
+    // ==== init ====
+    (async ()=>{
+      if(selectedDay < SEM_START) selectedDay = new Date(SEM_START);
+      if(selectedDay > SEM_END)   selectedDay = new Date(SEM_END);
+      weekStart = mondayOf(selectedDay);
+
+      // автодополнение (не обязательно)
+      fetchGroupsToDatalist();
+
+      // поле ввода + Enter / blur
+      groupInput.value = currentGroup;
+      const applyGroup = async ()=>{
+        currentGroup = (groupInput.value||"").trim();
+        localStorage.setItem('group', currentGroup);
+        await updateDay();
+      };
+      groupInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyGroup(); });
+      groupInput.addEventListener('blur', applyGroup);
+
+      prevBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()-7);
+        if(semWeekIndex(n)>=1){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
+      nextBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()+7);
+        if(semWeekIndex(n)<=SEM_WEEKS){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
+
+      // первичный рендер (скелет), затем данные если группа уже сохранена
+      await renderWeekStrip();
+      renderPairs(ensureFive([]));
+      if(currentGroup) await updateDay();
+    })();
+  </script>
+</body>
+</html>

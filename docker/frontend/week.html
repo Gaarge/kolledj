@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Расписание по неделе</title>
+  <style>
+    :root{--bg:#0b1e3f;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0b1e3f 0%,#0a1a33 100%);color:var(--fg);
+         font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+    .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+            padding:.6rem 1rem;background:linear-gradient(180deg,#0b1e3fee,#0b1e3fcc);border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)}
+    .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem}
+    .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85}
+    .tab.sel{background:#ffffff22;opacity:1}
+    .grow{flex:1}
+    .grp{display:inline-flex;gap:.4rem;align-items:center}
+    .grp label{font-weight:700;opacity:.85}
+    input[type="text"]{
+      appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
+      padding:.35rem .6rem;min-width:12rem;outline:none;
+    }
+    input[type="text"]::placeholder{color:#d0dbff88}
+
+    .wrap{padding:1rem;max-width:1100px;margin:0 auto}
+    .weeknav{display:flex;align-items:center;justify-content:space-between;padding:0 1rem .5rem}
+    .navbtn{background:transparent;border:none;color:var(--fg);font-size:1.25rem;cursor:pointer;padding:.35rem .5rem;border-radius:.5rem;line-height:1}
+    .navbtn[disabled]{opacity:.4;cursor:not-allowed}
+    .where{opacity:.9;font-weight:800}
+    .grid{display:grid;gap:1rem}
+    @media (max-width:640px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (min-width:641px) and (max-width:1024px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+    @media (min-width:1025px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+    .day{background:var(--card);border:1px solid var(--grid);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+    .day:nth-child(even){background:var(--card2)}
+    .dayHead{padding:.75rem 1rem;border-bottom:1px solid var(--grid);font-weight:800}
+    .list{padding:.5rem 1rem 1rem;display:flex;flex-direction:column;gap:.5rem}
+    .row{display:flex;gap:.5rem;align-items:center;border:1px solid var(--grid);border-radius:8px;padding:.35rem .5rem;min-height:36px}
+    .idx{font-weight:800;width:1.8rem;text-align:center}
+    .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .muted{opacity:.75}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="tabs">
+      <a class="tab" href="/day.html">День</a>
+      <a class="tab sel" href="/week.html">Неделя</a>
+    </div>
+    <div class="grow"></div>
+    <div class="grp">
+      <label for="groupInput">Группа</label>
+      <input id="groupInput" type="text" placeholder="например, ОИ21-09" list="groupsList" />
+      <datalist id="groupsList"></datalist>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="weeknav">
+      <button class="navbtn" id="prevWeek" aria-label="Предыдущая неделя">⟵</button>
+      <div class="where" id="where"></div>
+      <button class="navbtn" id="nextWeek" aria-label="Следующая неделя">⟶</button>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <script>
+    const SEM_START=new Date(2025,8,1), SEM_WEEKS=16;
+    const SEM_END=new Date(+SEM_START+(SEM_WEEKS*7-1)*24*3600*1000);
+    const PAIRS=[{num:1,start:"09:00",end:"10:30"},{num:2,start:"10:40",end:"12:10"},{num:3,start:"12:40",end:"14:10"},{num:4,start:"14:20",end:"15:50"},{num:5,start:"16:20",end:"17:50"}];
+    const pad=n=>String(n).padStart(2,'0');
+    const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const mondayOf=date=>{const d=new Date(date); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd); d.setHours(0,0,0,0); return d;};
+    const fmtMonthRu=d=>["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"][d.getMonth()]+" "+d.getFullYear();
+    const semWeekIndex=date=>{const diff=Math.floor((mondayOf(date)-mondayOf(SEM_START))/(7*24*3600*1000)); return diff+1;};
+
+    const grid=document.getElementById('grid');
+    const where=document.getElementById('where');
+    const groupInput=document.getElementById('groupInput');
+    const groupsList=document.getElementById('groupsList');
+    const prevBtn=document.getElementById('prevWeek');
+    const nextBtn=document.getElementById('nextWeek');
+
+    let weekStart=mondayOf(new Date());
+    let currentGroup=localStorage.getItem('group')||"";
+
+    async function fetchGroupsToDatalist(){
+      try{
+        const r=await fetch('/api/groups',{cache:'no-store'});
+        if(!r.ok) return;
+        const data=await r.json();
+        const arr=Array.isArray(data)?data:(data.groups||[]);
+        groupsList.innerHTML = arr.map(g=>`<option value="${g}"/>`).join('');
+      }catch{}
+    }
+    async function fetchDay(group,date){
+      if(!group) return [];
+      const r=await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`,{cache:'no-store'});
+      if(!r.ok) return [];
+      return await r.json();
+    }
+    function ensureFive(map){
+      const out=[]; for(let j=1;j<=5;j++){ const x=map[j]||{}; const d=PAIRS[j-1];
+        out.push({pair:j,subject:x.subject||"",start:x.time_start||d.start,end:x.time_end||d.end}); }
+      return out;
+    }
+    async function render(){
+      if(weekStart < mondayOf(SEM_START)) weekStart=mondayOf(SEM_START);
+      if(weekStart > mondayOf(SEM_END))   weekStart=mondayOf(SEM_END);
+      const idx=semWeekIndex(weekStart);
+      where.textContent = `${fmtMonthRu(weekStart)} • ${idx} неделя`;
+      prevBtn.disabled = idx<=1; nextBtn.disabled = idx>=SEM_WEEKS;
+
+      grid.innerHTML="";
+      const days=[]; for(let i=0;i<7;i++){ const d=new Date(weekStart); d.setDate(weekStart.getDate()+i); days.push(d); }
+
+      // база: «пустая» сетка
+      for(const d of days){
+        const box=document.createElement('div'); box.className='day';
+        const head=document.createElement('div'); head.className='dayHead';
+        head.textContent=["Вс","Пн","Вт","Ср","Чт","Пт","Сб"][d.getDay()] + ` • ${d.getDate()}.${pad(d.getMonth()+1)}`;
+        const list=document.createElement('div'); list.className='list';
+        for(let j=1;j<=5;j++){
+          const row=document.createElement('div'); row.className='row';
+          row.innerHTML=`<div class="idx">${j}.</div><div class="title"><span class="muted">—</span></div>`;
+          list.appendChild(row);
+        }
+        box.appendChild(head); box.appendChild(list); grid.appendChild(box);
+      }
+
+      // если пользователь ввёл группу — наполняем
+      if(currentGroup){
+        const data=await Promise.all(days.map(d=>fetchDay(currentGroup,d)));
+        [...grid.children].forEach((box,i)=>{
+          const map={}; (data[i]||[]).forEach(it=>{ const p=it.pair_number??it.pair; if(p) map[p]=it; });
+          const rows=ensureFive(map);
+          const list=box.querySelector('.list'); list.innerHTML="";
+          rows.forEach(r=>{
+            const row=document.createElement('div'); row.className='row';
+            const title = r.subject ? r.subject : "<span class='muted'>—</span>";
+            row.innerHTML=`<div class="idx">${r.pair}.</div><div class="title">${title} <span class="muted">${r.start}–${r.end}</span></div>`;
+            list.appendChild(row);
+          });
+        });
+      }
+    }
+
+    (async()=>{
+      fetchGroupsToDatalist(); // только для подсказок
+      groupInput.value = currentGroup;
+      const applyGroup = async ()=>{ currentGroup=(groupInput.value||"").trim(); localStorage.setItem('group',currentGroup); await render(); };
+      groupInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyGroup(); });
+      groupInput.addEventListener('blur', applyGroup);
+
+      if(weekStart<mondayOf(SEM_START)) weekStart=mondayOf(SEM_START);
+      if(weekStart>mondayOf(SEM_END))   weekStart=mondayOf(SEM_END);
+      prevBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()-7); weekStart=n; await render(); };
+      nextBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()+7); weekStart=n; await render(); };
+      await render();
+    })();
+  </script>
+</body>
+</html>

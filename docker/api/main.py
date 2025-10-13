@@ -9,7 +9,7 @@ from pydantic import BaseModel
 APP_NAME = "schedule-api"
 DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql://user:pass@host:5432/db
 
-app = FastAPI(title=APP_NAME, version="1.1.0")
+app = FastAPI(title=APP_NAME, version="1.3.0")
 
 class ScheduleItem(BaseModel):
     id: int
@@ -43,46 +43,79 @@ async def healthz():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Функция нормализации строки с именем группы на стороне SQL:
+# 1) lower()
+# 2) translate латинских двойников -> кириллица (A↔А, O↔О, P↔Р, C↔С, E↔Е, X↔Х, H↔Н, K↔К, M↔М, T↔Т, Y↔У)
+# 3) убрать всё, что не буква/цифра (пробелы/дефисы/точки)
+NORMALIZE_SQL_EXPR = """
+  regexp_replace(
+    lower(
+      translate(
+        $1,
+        'ABCEHKMOPTXYabcehkmoptxy',
+        'АВСЕНКМОРТХУавсенкмортху'
+      )
+    ),
+    '[^0-9a-zа-яё]+', '', 'g'
+  )
+"""
+
 @app.get("/api/schedule", response_model=List[ScheduleItem])
 async def get_schedule(
     response: Response,
-    group: str = Query(..., min_length=3, max_length=32, alias="group"),
-    date_: str = Query(..., alias="date", min_length=10, max_length=10), # YYYY-MM-DD
+    group: str = Query(..., min_length=1, max_length=64, alias="group"),
+    date_: str = Query(..., alias="date", min_length=10, max_length=10),  # YYYY-MM-DD
 ):
-    # вычисляем день недели из даты — 1..7
+    # день недели: Пн=1 .. Вс=7
     try:
         d = Date.fromisoformat(date_)
-        weekday = d.isoweekday()  # Пн=1..Вс=7
+        weekday = d.isoweekday()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
-
-    group_norm = group.strip()
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """
-            SELECT id,
-                   pair_number,
-                   to_char(time_start,'HH24:MI') AS time_start,
-                   to_char(time_end,'HH24:MI')   AS time_end,
-                   COALESCE(subject,'')          AS subject,
-                   COALESCE(session_type,'')     AS session_type,
-                   COALESCE(room,'')             AS room,
-                   COALESCE(teacher,'')          AS teacher,
-                   group_name
-            FROM weekday_schedule
-            WHERE group_name = $1 AND weekday = $2
-            ORDER BY pair_number
+            f"""
+            WITH inp AS ( SELECT {NORMALIZE_SQL_EXPR} AS g )
+            SELECT
+               s.id,
+               s.pair_number,
+               to_char(s.time_start,'HH24:MI') AS time_start,
+               to_char(s.time_end,'HH24:MI')   AS time_end,
+               COALESCE(s.subject,'')          AS subject,
+               COALESCE(s.session_type,'')     AS session_type,
+               COALESCE(s.room,'')             AS room,
+               COALESCE(s.teacher,'')          AS teacher,
+               s.group_name
+            FROM weekday_schedule s, inp
+            WHERE
+              regexp_replace(
+                lower(
+                  translate(
+                    s.group_name,
+                    'ABCEHKMOPTXYabcehkmoptxy',
+                    'АВСЕНКМОРТХУавсенкмортху'
+                  )
+                ),
+                '[^0-9a-zа-яё]+','', 'g'
+              ) = inp.g
+              AND s.weekday = $2
+            ORDER BY s.pair_number
             """,
-            group_norm, weekday,
+            group, weekday
         )
 
-    # добавим клиенту ту же дату, что он запросил
     result = []
     for r in rows:
         item = dict(r)
         item["date"] = d
         result.append(item)
-
     return result
+
+@app.get("/api/groups")
+async def get_groups():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT DISTINCT group_name FROM weekday_schedule ORDER BY 1;")
+    return {"groups": [r["group_name"] for r in rows]}
