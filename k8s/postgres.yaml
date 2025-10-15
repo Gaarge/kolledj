@@ -39,7 +39,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: kol/postgres-import:local
+        image: schedule-db:local
         ports: [ { containerPort: 5432 } ]
         env:
           - { name: POSTGRES_USER,     value: "schedule_user" }

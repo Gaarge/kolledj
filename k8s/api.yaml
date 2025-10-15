@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: sh/api:last
+        image: schedule-api:local
         ports: [ { containerPort: 8000 } ]
         env:
           - name: DATABASE_URL
