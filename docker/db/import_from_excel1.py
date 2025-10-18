@@ -32,13 +32,6 @@ WEEKDAY_MAP = {
 }
 REV_WEEKDAY = {v: k for k, v in WEEKDAY_MAP.items()}
 
-# маппинг значений из колонки «Тип недели»
-WEEK_TYPE_MAP = {
-    'все': 'all', 'всё': 'all', 'all': 'all', '': 'all', 'nan': 'all',
-    'четная': 'even', 'чётная': 'even', 'чет': 'even', 'ч': 'even',
-    'нечетная': 'odd', 'нечётная': 'odd', 'нечет': 'odd', 'нч': 'odd', 'н': 'odd',
-}
-
 STRUCT_COLS = [
     "группа", "день недели", "номер пары", "время начала", "время окончания",
     "название предмета", "преподаватель", "аудитория", "тип недели"
@@ -131,9 +124,7 @@ def try_load_structured(xl: pd.ExcelFile) -> Optional[List[Dict[str, Any]]]:
         subject = str(row.iloc[map_idx["название предмета"]]).strip()
         teacher = str(row.iloc[map_idx["преподаватель"]]).strip()
         room    = str(row.iloc[map_idx["аудитория"]]).strip()
-        week_raw = str(row.iloc[map_idx.get("тип недели", -1)]) if ("тип недели" in map_idx) else ""
-        week_raw = (week_raw or "").strip().lower()
-        week_type = WEEK_TYPE_MAP.get(week_raw, 'all')
+        # тип недели пока не используем
 
         rows.append({
             "weekday": weekday,
@@ -145,7 +136,6 @@ def try_load_structured(xl: pd.ExcelFile) -> Optional[List[Dict[str, Any]]]:
             "room": room,
             "teacher": teacher,
             "group_name": group,
-            "week_type": week_type,
         })
 
     return rows
@@ -230,7 +220,6 @@ def parse_legacy(xl: pd.ExcelFile) -> List[Dict[str, Any]]:
                         "room": str(room),
                         "teacher": teacher if teacher else "",
                         "group_name": g,
-                        "week_type": "all",
                     })
 
     return all_rows
@@ -241,59 +230,22 @@ def parse_legacy(xl: pd.ExcelFile) -> List[Dict[str, Any]]:
 def ensure_schema(conn) -> None:
     with conn.cursor() as cur:
         cur.execute("""
-        
-CREATE TABLE IF NOT EXISTS weekday_schedule (
-  id SERIAL PRIMARY KEY,
-  weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
-  pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
-  time_start TIME NOT NULL,
-  time_end   TIME NOT NULL,
-  subject    TEXT,
-  session_type VARCHAR(16),
-  room       VARCHAR(32),
-  teacher    TEXT,
-  group_name VARCHAR(32) NOT NULL,
-  week_type  VARCHAR(8) NOT NULL DEFAULT 'all',  -- 'all' | 'odd' | 'even'
-  created_at TIMESTAMPTZ DEFAULT now()
-);
--- на случай первого запуска создадим индекс, по которому чаще всего фильтруем
-CREATE INDEX IF NOT EXISTS idx_weekday_schedule_group_day
-  ON weekday_schedule (group_name, weekday);
--- миграция: добавить колонку week_type, если её нет; удалить старый уникальный констрейнт и создать новый
-DO $$
-DECLARE
-  c TEXT;
-BEGIN
-  -- добавить колонку week_type, если её нет
-  BEGIN
-    ALTER TABLE weekday_schedule
-      ADD COLUMN IF NOT EXISTS week_type VARCHAR(8) NOT NULL DEFAULT 'all';
-  EXCEPTION WHEN others THEN
-    NULL;
-  END;
-
-  -- найти старый уникальный констрейнт (group_name, weekday, pair_number)
-  SELECT conname INTO c
-  FROM pg_constraint pc
-  JOIN pg_class t ON t.oid = pc.conrelid
-  WHERE t.relname = 'weekday_schedule'
-    AND pc.contype = 'u'
-    AND (
-      SELECT array_agg(a.attname ORDER BY a.attnum)
-      FROM unnest(pc.conkey) AS k(attnum)
-      JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-    ) = ARRAY['group_name','weekday','pair_number']::name[];  -- ← приведение типов
-
-  IF c IS NOT NULL THEN
-    EXECUTE format('ALTER TABLE weekday_schedule DROP CONSTRAINT %I', c);
-  END IF;
-END $$;
-
--- убрать старый индекс, если вдруг остался
-DROP INDEX IF EXISTS uniq_weekday_schedule_gwpw;
--- новый уникальный индекс: различаем подгруппы (teacher/room)
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_weekday_gwpwtr
-  ON weekday_schedule (group_name, weekday, pair_number, week_type, teacher, room);
+        CREATE TABLE IF NOT EXISTS weekday_schedule (
+          id SERIAL PRIMARY KEY,
+          weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+          pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
+          time_start TIME NOT NULL,
+          time_end   TIME NOT NULL,
+          subject    TEXT,
+          session_type VARCHAR(16),
+          room       VARCHAR(32),
+          teacher    TEXT,
+          group_name VARCHAR(32) NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT now(),
+          UNIQUE (group_name, weekday, pair_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_weekday_schedule_group_day
+          ON weekday_schedule (group_name, weekday);
         """)
     conn.commit()
 
@@ -375,7 +327,7 @@ def main() -> None:
         conn.commit()
 
         cols = ["weekday","pair_number","time_start","time_end",
-                "subject","session_type","room","teacher","group_name","week_type"]
+                "subject","session_type","room","teacher","group_name"]
 
         # Готовим значения
         values = [[row.get(c) for c in cols] for row in rows]

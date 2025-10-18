@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: gaarge/api:2.3
+        image: gaarge/api:2.4
         ports: [ { containerPort: 8000 } ]
         env:
           - name: DATABASE_URL

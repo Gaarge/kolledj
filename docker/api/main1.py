@@ -9,7 +9,7 @@ from pydantic import BaseModel
 APP_NAME = "schedule-api"
 DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql://user:pass@host:5432/db
 
-app = FastAPI(title=APP_NAME, version="1.4.0")
+app = FastAPI(title=APP_NAME, version="1.3.0")
 
 class ScheduleItem(BaseModel):
     id: int
@@ -70,16 +70,6 @@ async def get_schedule(
     try:
         d = Date.fromisoformat(date_)
         weekday = d.isoweekday()
-        # определяем чётность недели
-        anchor_str = os.getenv('ODD_WEEK_ANCHOR', '2024-09-02')
-        try:
-            anchor = Date.fromisoformat(anchor_str)
-            delta_days = (d - anchor).days
-            weeks = delta_days // 7
-            parity = 'odd' if (weeks % 2 == 0) else 'even'  # неделя якоря считается нечётной
-        except Exception:
-            # запасной вариант — ISO-нумерация недель
-            parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
 
@@ -88,7 +78,7 @@ async def get_schedule(
         rows = await conn.fetch(
             f"""
             WITH inp AS ( SELECT {NORMALIZE_SQL_EXPR} AS g )
-            SELECT DISTINCT ON (s.pair_number)
+            SELECT
                s.id,
                s.pair_number,
                to_char(s.time_start,'HH24:MI') AS time_start,
@@ -100,8 +90,6 @@ async def get_schedule(
                s.group_name
             FROM weekday_schedule s, inp
             WHERE
-              COALESCE(s.week_type,'all') IN ('all', $3)
-              AND
               regexp_replace(
                 lower(
                   translate(
@@ -113,10 +101,9 @@ async def get_schedule(
                 '[^0-9a-zа-яё]+','', 'g'
               ) = inp.g
               AND s.weekday = $2
-            ORDER BY s.pair_number,
-              CASE COALESCE(s.week_type,'all') WHEN $3 THEN 0 WHEN 'all' THEN 1 ELSE 2 END
+            ORDER BY s.pair_number
             """,
-            group, weekday, parity
+            group, weekday
         )
 
     result = []
