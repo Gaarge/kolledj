@@ -1,4 +1,4 @@
-FROM postgres:15
+FROM postgres:15.7
 
 # Ставим системный Python + venv (pip отдельно не нужен — venv подтянет ensurepip)
 RUN apt-get update && apt-get install -y --no-install-recommends \

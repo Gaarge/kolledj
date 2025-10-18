@@ -1,48 +1,70 @@
 #!/usr/bin/env python3
-import os, re, sys
+# -*- coding: utf-8 -*-
+
+"""
+Импорт расписания из Excel в таблицу weekday_schedule с ожиданием готовности БД,
+ретраями и подробным логированием.
+
+Зависимости (ставятся в Dockerfile):
+  pandas, openpyxl, psycopg2-binary
+"""
+
+import os
+import re
+import sys
+import time
 from datetime import time as dtime
+from typing import List, Dict, Any, Optional, Tuple
+
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
+
+
+# ---------- Константы и утилиты ----------
 
 EXCEL_PATH = os.getenv("EXCEL_PATH", "/app/excel/schedule.xlsx")
 
 # 1=Пн .. 7=Вс
 WEEKDAY_MAP = {
-    "понедельник":1,"вторник":2,"среда":3,"среда ":3,"четверг":4,"четверг ":4,
-    "пятница":5,"пятница ":5,"суббота":6,"суббота ":6,"воскресенье":7,
+    "понедельник": 1, "вторник": 2, "среда": 3, "среда ": 3, "четверг": 4, "четверг ": 4,
+    "пятница": 5, "пятница ": 5, "суббота": 6, "суббота ": 6, "воскресенье": 7,
 }
-REV_WEEKDAY = {v:k for k,v in WEEKDAY_MAP.items()}
+REV_WEEKDAY = {v: k for k, v in WEEKDAY_MAP.items()}
+
+STRUCT_COLS = [
+    "группа", "день недели", "номер пары", "время начала", "время окончания",
+    "название предмета", "преподаватель", "аудитория", "тип недели"
+]
 
 TIME_RE = re.compile(r'(\d{1,2})[.:](\d{2})\s*[-–]\s*(\d{1,2})[.:](\d{2})')
 
 def log(*a): print("[import]", *a, flush=True)
+def warn(*a): print("[import][WARN]", *a, flush=True, file=sys.stderr)
+def err(*a): print("[import][ERROR]", *a, flush=True, file=sys.stderr)
 
-def to_time_pair(s: str):
-    if not isinstance(s, str): return None, None
+def to_int(x, default=None):
+    try:
+        return int(x)
+    except Exception:
+        return default
+
+def to_time_pair(s: str) -> Tuple[Optional[dtime], Optional[dtime]]:
+    if not isinstance(s, str):
+        return None, None
     m = TIME_RE.search(s)
-    if not m: return None, None
+    if not m:
+        return None, None
     h1, m1, h2, m2 = map(int, m.groups())
     return dtime(h1, m1), dtime(h2, m2)
 
-def to_int(x, default=None):
-    try: return int(x)
-    except: return default
 
-def norm_week_type(x: str):
-    if not isinstance(x, str): return "все"
-    t = x.strip().lower()
-    if "четн" in t: return "четная"
-    if "нечет" in t or "н/ч" in t or "нч" in t: return "нечетная"
-    return "все"
+# ---------- Парсинг Excel ----------
 
-# ====== Ветка 1: структурированный Excel ======
-STRUCT_COLS = [
-    "группа","день недели","номер пары","время начала","время окончания",
-    "название предмета","преподаватель","аудитория","тип недели"
-]
-
-def try_load_structured(xl: pd.ExcelFile):
+def try_load_structured(xl: pd.ExcelFile) -> Optional[List[Dict[str, Any]]]:
+    """
+    Ожидается один лист (например, 'Расписание') с колонками STRUCT_COLS.
+    """
     try:
         df = xl.parse(xl.sheet_names[0])
     except Exception:
@@ -53,42 +75,80 @@ def try_load_structured(xl: pd.ExcelFile):
         return None
 
     map_idx = {c: cols.index(c) for c in STRUCT_COLS}
-    rows = []
+    rows: List[Dict[str, Any]] = []
+
     for _, row in df.iterrows():
         group = str(row.iloc[map_idx["группа"]]).strip()
-        day   = str(row.iloc[map_idx["день недели"]]).strip().lower()
-        pair  = to_int(row.iloc[map_idx["номер пары"]])
-        t1s   = str(row.iloc[map_idx["время начала"]]).strip()
-        t2s   = str(row.iloc[map_idx["время окончания"]]).strip()
-        sub   = str(row.iloc[map_idx["название предмета"]]).strip()
-        teach = str(row.iloc[map_idx["преподаватель"]]).strip()
-        room  = str(row.iloc[map_idx["аудитория"]]).strip()
-        wtype = norm_week_type(str(row.iloc[map_idx["тип недели"]]))
-
-        if not group or day not in WEEKDAY_MAP or not pair:
+        if not group or group.lower() == "nan":
             continue
 
-        # NB: тип недели храним в session_type, как у тебя в схеме
+        day = str(row.iloc[map_idx["день недели"]]).strip().lower()
+        weekday = WEEKDAY_MAP.get(day, 0)
+        if weekday == 0:
+            continue
+
+        pair = to_int(row.iloc[map_idx["номер пары"]])
+        if not pair:
+            continue
+
+        # время может быть как в отдельных колонках, так и «08:20-09:50»
+        t1, t2 = None, None
+        v_start = row.iloc[map_idx["время начала"]]
+        v_end   = row.iloc[map_idx["время окончания"]]
+        if isinstance(v_start, str) and "-" in v_start:
+            t1, t2 = to_time_pair(v_start)
+        else:
+            # отдельные значения, например 08:20 и 09:50
+            try:
+                s = str(v_start)
+                h, m = map(int, s.split(":"))
+                t1 = dtime(h, m)
+            except Exception:
+                pass
+            try:
+                s = str(v_end)
+                h, m = map(int, s.split(":"))
+                t2 = dtime(h, m)
+            except Exception:
+                pass
+
+        if not t1 or not t2:
+            # попробуем из «Название предмета» извлечь время, если оно там
+            ts, te = to_time_pair(str(row.iloc[map_idx["название предмета"]]))
+            t1 = t1 or ts
+            t2 = t2 or te
+
+        if not t1 or not t2:
+            continue
+
+        subject = str(row.iloc[map_idx["название предмета"]]).strip()
+        teacher = str(row.iloc[map_idx["преподаватель"]]).strip()
+        room    = str(row.iloc[map_idx["аудитория"]]).strip()
+        # тип недели пока не используем
+
         rows.append({
-            "weekday": WEEKDAY_MAP[day],
+            "weekday": weekday,
             "pair_number": pair,
-            "time_start": t1s,
-            "time_end": t2s,
-            "subject": sub,
-            "session_type": wtype,
+            "time_start": t1.strftime("%H:%M"),
+            "time_end":   t2.strftime("%H:%M"),
+            "subject": subject,
+            "session_type": "",
             "room": room,
-            "teacher": teach,
+            "teacher": teacher,
             "group_name": group,
         })
+
     return rows
 
-# ====== Ветка 2 (fallback): старый «грязный» Excel ======
-def parse_legacy(xl: pd.ExcelFile):
-    # Этот парсер похож на твой: он умеет вытаскивать время/ауд./преп./группы,
-    # но SUBJECT в таком файле извлечь надёжно нельзя -> будет пустым.
+
+def parse_legacy(xl: pd.ExcelFile) -> List[Dict[str, Any]]:
+    """
+    Резервный парсер — по листам, названным днями недели.
+    subject в таком формате часто не извлекается надёжно -> оставляем пустым.
+    """
     def find_time_col(df):
         for c in range(min(5, df.shape[1])):
-            if any(isinstance(x,str) and TIME_RE.search(str(x)) for x in df.iloc[:, c][:8].tolist()):
+            if any(isinstance(x, str) and TIME_RE.search(str(x)) for x in df.iloc[:, c][:8].tolist()):
                 return c
         return 0
 
@@ -97,56 +157,77 @@ def parse_legacy(xl: pd.ExcelFile):
         probe = df.iloc[header_row:header_row+3, :]
         for r in range(probe.shape[0]):
             for c in range(probe.shape[1]):
-                if c == time_col: continue
+                if c == time_col:
+                    continue
                 val = str(probe.iat[r, c]).strip()
-                if not val or val.lower() == 'nan': continue
-                if re.fullmatch(r'\d+[A-Za-zА-Яа-я\-]*', val):
+                # простая эвристика «Ауд 34»/«34» и т.п.
+                if re.search(r'(Ауд|ауд|^[0-9A-Za-zА-Яа-я\-]+$)', val):
                     rooms[c] = val
         return rooms
 
-    def parse_time_range(s): return to_time_pair(s)
+    all_rows: List[Dict[str, Any]] = []
 
-    all_rows = []
     for sh in xl.sheet_names:
-        if sh.strip().lower() not in WEEKDAY_MAP: continue
+        sh_norm = sh.strip().lower()
+        if sh_norm not in WEEKDAY_MAP:
+            continue
+
         df = xl.parse(sh, header=None)
         header_row = 0
         for r in range(min(5, df.shape[0])):
             row = df.iloc[r, :].astype(str).tolist()
             if any('Ауд' in x for x in row):
-                header_row = r; break
+                header_row = r
+                break
+
         time_col = find_time_col(df)
         rooms = collect_rooms(df, header_row, time_col)
 
+        # разбор строк с временами «08:20-09:50»
         pair_idx = 0
-        for r in range(header_row+1, df.shape[0]):
-            t1, t2 = parse_time_range(str(df.iat[r, time_col]))
-            if not t1: 
+        for r in range(header_row + 1, df.shape[0]):
+            time_cell = str(df.iat[r, time_col])
+            t1, t2 = to_time_pair(time_cell)
+            if not t1 or not t2:
                 continue
             pair_idx += 1
-            for c in range(time_col+1, df.shape[1]):
+
+            for c in range(df.shape[1]):
+                if c == time_col:
+                    continue
                 cell = str(df.iat[r, c]).strip()
-                if not cell or cell.lower() == 'nan': continue
-                # грубое выделение групп и преподавателя
-                groups = re.findall(r'[A-Za-zА-Яа-яё0-9/.-]{3,}', cell)
-                teacher = re.sub(r'.*?\b([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){0,2})\b.*', r'\1', cell).strip()
+                if not cell or cell.lower() == 'nan':
+                    continue
+
+                # грубая эвристика для групп и ФИО
+                groups = re.findall(r'[A-Za-zА-Яа-яё0-9/.\-]{3,}', cell)
+                teacher = re.sub(
+                    r'.*?\b([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){0,2})\b.*',
+                    r'\1', cell
+                ).strip()
                 room = rooms.get(c, "")
+
                 for g in groups:
-                    if not g: continue
+                    if not g:
+                        continue
                     all_rows.append({
-                        "weekday": WEEKDAY_MAP.get(sh.strip().lower(), 0),
+                        "weekday": WEEKDAY_MAP.get(sh_norm, 0),
                         "pair_number": pair_idx,
                         "time_start": t1.strftime("%H:%M"),
                         "time_end":   t2.strftime("%H:%M"),
-                        "subject": "",              # вот почему у тебя пусто
+                        "subject": "",          # в legacy надёжно не извлекаем
                         "session_type": "",
                         "room": str(room),
                         "teacher": teacher if teacher else "",
                         "group_name": g,
                     })
+
     return all_rows
 
-def ensure_schema(conn):
+
+# ---------- Схема БД ----------
+
+def ensure_schema(conn) -> None:
     with conn.cursor() as cur:
         cur.execute("""
         CREATE TABLE IF NOT EXISTS weekday_schedule (
@@ -166,24 +247,12 @@ def ensure_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_weekday_schedule_group_day
           ON weekday_schedule (group_name, weekday);
         """)
-        conn.commit()
+    conn.commit()
 
-def main():
-    log(f"excel: {EXCEL_PATH}")
-    xl = pd.ExcelFile(EXCEL_PATH)
 
-    rows = try_load_structured(xl)
-    if rows is not None:
-        log(f"structured rows: {len(rows)}")
-    else:
-        log("structured format not detected -> fallback to legacy parsing")
-        rows = parse_legacy(xl)
-        log(f"legacy rows: {len(rows)}")
+# ---------- Ожидание БД с ретраями ----------
 
-    if not rows:
-        log("nothing to import"); return
-
-    # подключение к Postgres
+def make_dsn_from_env() -> str:
     env = os.environ
     user = env.get("POSTGRES_USER", "postgres")
     db   = env.get("POSTGRES_DB",   "postgres")
@@ -192,24 +261,98 @@ def main():
     pwd  = env.get("POSTGRES_PASSWORD", "")
 
     dsn = env.get("DATABASE_URL") or f"postgresql://{user}:{pwd}@{host}:{port}/{db}"
-    log("connect:", dsn)
+    return dsn
+
+def wait_for_db(dsn: str,
+                timeout_sec: int = None,
+                retry_interval_sec: int = None) -> None:
+    """
+    Ждём, пока БД начнёт принимать подключения.
+    """
+    timeout_sec = timeout_sec or int(os.getenv("DB_WAIT_TIMEOUT_SEC", "300"))
+    retry_interval_sec = retry_interval_sec or int(os.getenv("RETRY_INTERVAL_SEC", "5"))
+
+    start = time.time()
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            conn = psycopg2.connect(dsn)
+            conn.close()
+            log(f"DB is ready after {attempt} attempt(s).")
+            return
+        except Exception as e:
+            elapsed = int(time.time() - start)
+            if elapsed >= timeout_sec:
+                raise RuntimeError(f"DB not ready after {elapsed}s: {e}")
+            warn(f"DB not ready yet (attempt {attempt}): {e}")
+            time.sleep(retry_interval_sec)
+
+
+# ---------- Основной поток ----------
+
+def main() -> None:
+    # Читаем Excel
+    if not os.path.exists(EXCEL_PATH):
+        raise FileNotFoundError(f"Excel not found at {EXCEL_PATH}")
+
+    log(f"reading excel: {EXCEL_PATH}")
+    xl = pd.ExcelFile(EXCEL_PATH)
+
+    rows: Optional[List[Dict[str, Any]]] = try_load_structured(xl)
+    if rows is not None:
+        log(f"structured rows: {len(rows)}")
+    else:
+        log("structured format not detected -> fallback to legacy parsing")
+        rows = parse_legacy(xl)
+        log(f"legacy rows: {len(rows)}")
+
+    if not rows:
+        log("nothing to import")
+        return
+
+    # Подключение к Postgres
+    dsn = make_dsn_from_env()
+    log("connecting to:", dsn)
+
+    # Ожидаем готовности БД
+    wait_for_db(dsn)
+
+    inserted = 0
     with psycopg2.connect(dsn) as conn:
         ensure_schema(conn)
+
         with conn.cursor() as cur:
             cur.execute("TRUNCATE weekday_schedule;")
-
-        cols = ["weekday","pair_number","time_start","time_end","subject","session_type","room","teacher","group_name"]
-        values = [[row.get(c) for c in cols] for row in rows]
-        with conn.cursor() as cur:
-            execute_values(cur,
-                f"INSERT INTO weekday_schedule ({', '.join(cols)}) VALUES %s ON CONFLICT DO NOTHING",
-                values, page_size=2000)
         conn.commit()
-    log("import done.")
+
+        cols = ["weekday","pair_number","time_start","time_end",
+                "subject","session_type","room","teacher","group_name"]
+
+        # Готовим значения
+        values = [[row.get(c) for c in cols] for row in rows]
+
+        # Пачками, чтобы не упираться в размер запроса
+        page_size = int(os.getenv("BULK_PAGE_SIZE", "2000"))
+        log(f"inserting {len(values)} rows (page_size={page_size})...")
+        with conn.cursor() as cur:
+            execute_values(
+                cur,
+                f"INSERT INTO weekday_schedule ({', '.join(cols)}) "
+                f"VALUES %s ON CONFLICT DO NOTHING",
+                values,
+                page_size=page_size
+            )
+            inserted = cur.rowcount if cur.rowcount is not None else 0
+        conn.commit()
+
+    log(f"import done. inserted (or kept due to conflict): ~{inserted} rows")
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print("[import][ERROR]", e, file=sys.stderr, flush=True)
-        sys.exit(0)  # не валим контейнер даже при ошибке
+        err(e)
+        # Ненулевой код — чтобы в логах было видно, что импорт сломался.
+        # (В postStart он сейчас завернут в '|| true', так что pod не упадёт.)
+        sys.exit(1)

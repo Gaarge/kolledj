@@ -39,7 +39,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: schedule-db:local
+        image: gaarge/db:2.3
         ports: [ { containerPort: 5432 } ]
         env:
           - { name: POSTGRES_USER,     value: "schedule_user" }
@@ -52,7 +52,9 @@ spec:
         lifecycle:
           postStart:
             exec:
-               command: ["sh", "-lc", "/opt/venv/bin/python /app/import_from_excel.py || true; echo '[postStart] import finished.'"]
+               command: ["sh","-lc","set -e; echo '[postStart] waiting for Postgres...'; for i in $(seq 1 60); do pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1 && break; sleep 2; done; pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1; echo \"[postStart] checking $EXCEL_PATH\"; [ -f \"$EXCEL_PATH\" ]; export DATABASE_URL=\"postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}\"; echo '[postStart] importing...'; /opt/venv/bin/python /app/import_from_excel.py; echo '[postStart] import finished'"]
+               
+               
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: pgdata }
