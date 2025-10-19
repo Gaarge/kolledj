@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Расписание на день — преподаватель</title>
+  <style>
+    :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
+      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+
+    .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+      padding:.6rem 1rem;background:linear-gradient(180deg,#515376FF,#6d6d8a);
+      border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)}
+    .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem}
+    .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85}
+    .tab.sel{background:#ffffff22;opacity:1}
+    .grow{flex:1}
+    .grp{display:inline-flex;gap:.4rem;align-items:center}
+    .grp label{font-weight:700;opacity:.85}
+    input[type="text"]{
+      appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
+      padding:.35rem .6rem;min-width:12rem;outline:none;
+    }
+    input[type="text"]::placeholder{color:#d0dbff88}
+
+    .wrap{padding:1rem;max-width:1100px;margin:0 auto}
+
+    /* навигация недели */
+    .weeknav{display:flex;align-items:center;justify-content:space-between;padding:0 1rem .5rem}
+    .navbtn{background:transparent;border:none;color:var(--fg);font-size:1.25rem;cursor:pointer;padding:.35rem .5rem;border-radius:.5rem;line-height:1}
+    .navbtn[disabled]{opacity:.4;cursor:not-allowed}
+    .where{opacity:.9;font-weight:800}
+
+    /* полоса дней недели */
+    .weekstrip{display:flex;gap:.5rem;align-items:flex-end;justify-content:space-between;padding:.35rem 1rem .75rem;border-bottom:1px solid var(--grid)}
+    .dw{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:38px}
+    .d{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:transparent;border:1px solid #ffffff33;color:var(--fg);font-weight:700}
+    .d.today{border-color:var(--accent)} .d.sel{background:#ffffff22;border-color:#ffffff55}
+    .dots{display:flex;gap:3px;flex-wrap:wrap;justify-content:center;min-height:6px}
+    .dot{width:6px;height:6px;border-radius:50%;background:#ffd24d}
+
+    /* карточки занятий — макет как на твоём примере */
+    .list{padding:1rem;display:flex;flex-direction:column;gap:.75rem}
+    .card{
+      border:1px solid var(--grid);border-radius:16px;padding:.9rem 1rem;background:var(--card);
+      display:flex;flex-direction:column;gap:.5rem
+    }
+    .card.alt{background:var(--card2)}
+    .line1{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+    .subj{font-weight:800;font-size:1.35rem;line-height:1.2;letter-spacing:.2px}
+    .meta{display:flex;align-items:center;justify-content:space-between;gap:1rem;font-weight:700;opacity:.9}
+    .pairNum{font-size:1rem}
+    .time{font-size:1rem;white-space:nowrap}
+    .divider{height:1px;background:rgba(255,255,255,.08); margin:.2rem 0 .35rem}
+    .room,.teacher{opacity:.9}
+    .room{font-weight:700}
+    .muted{opacity:.65}
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <div class="tabs">
+    <a class="tab sel" href="/day-teacher.html">День</a>
+    <a class="tab" href="/week-teacher.html">Неделя</a>
+  </div>
+  <div class="grow"></div>
+  <div class="grp">
+    <label for="teacherInput">Преподаватель</label>
+    <input id="teacherInput" type="text" placeholder="например, Иванов Иван Иваныч" list="teachersList" />
+    <datalist id="teachersList"></datalist>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="weeknav">
+    <button class="navbtn" id="prevWeek" aria-label="Предыдущая неделя">⟵</button>
+    <div class="where" id="where"></div>
+    <button class="navbtn" id="nextWeek" aria-label="Следующая неделя">⟶</button>
+  </div>
+
+  <div class="weekstrip" id="weekStrip" aria-label="Неделя"></div>
+
+  <div class="list" id="pairsList"></div>
+</div>
+
+<script>
+  /* ==== Константы семестра ==== */
+  const SEM_START=new Date(2025,8,1), SEM_WEEKS=16;
+  const SEM_END=new Date(+SEM_START+(SEM_WEEKS*7-1)*24*3600*1000);
+
+  /* ==== утилиты дат ==== */
+  const pad=n=>String(n).padStart(2,'0');
+  const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const mondayOf=date=>{const d=new Date(date); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd); d.setHours(0,0,0,0); return d;};
+  const sameDay=(a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  const fmtMonthRu=d=>["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"][d.getMonth()]+" "+d.getFullYear();
+  const semWeekIndex=date=>{const diff=Math.floor((mondayOf(date)-mondayOf(SEM_START))/(7*24*3600*1000)); return diff+1;};
+
+  /* ==== элементы ==== */
+  const weekStripEl=document.getElementById('weekStrip');
+  const listEl=document.getElementById('pairsList');
+  const where=document.getElementById('where');
+  const teacherInput=document.getElementById('teacherInput');
+  const teachersList = document.getElementById('teachersList');
+  const prevBtn=document.getElementById('prevWeek');
+  const nextBtn=document.getElementById('nextWeek');
+
+  // === Авторизация на странице ===
+  (function(){
+    const token = localStorage.getItem('token');
+    const role  = localStorage.getItem('role');
+    if (!token) { window.location.href = 'index.html'; return; }
+    if (role !== 'teacher') { window.location.href = 'menu.html'; return; }
+    window.__AUTH_TOKEN__ = token;
+  })();
+
+  /* ==== состояние ==== */
+  let selectedDay=new Date();
+  let weekStart=mondayOf(selectedDay);
+  let currentTeacher = localStorage.getItem('teacher') ||"";
+
+  /* ==== API ==== */
+  async function fetchTeachersToDatalist(){
+    try{
+      const r=await fetch('/api/teachers',{
+        cache:'no-store',
+        headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
+      });
+      if (r.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('role');
+        localStorage.removeItem('username');
+        window.location.href = 'index.html';
+        return;
+      }
+      
+      if(!r.ok) return;
+      const data=await r.json();
+      const arr=Array.isArray(data)?data:(data.teachers || []);
+      teachersList.innerHTML = arr.map(t => `<option value="${t}"/>`).join('');
+    }catch{}
+  }
+  async function fetchDay(teacher,date){
+    if(!teacher) return [];
+    const r=await fetch(`/api/schedule_by_teacher?teacher=${encodeURIComponent(teacher)}&date=${iso(date)}`,{
+      cache:'no-store',
+      headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
+    });
+    if (r.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+      localStorage.removeItem('username');
+      window.location.href = 'index.html';
+      return [];
+    }
+    
+    if(!r.ok) return [];
+    return await r.json();
+  }
+
+  /* ==== helpers ==== */
+  const getSubject = it => {
+    const candidates = [
+      it.subject, it.name, it.discipline, it.title, it.course,
+      it['дисциплина'], it['название']
+    ].filter(v => v && String(v).trim().length);
+    return (candidates[0]||"").toString().trim();
+  };
+  const getRoom = it => (it.room ?? it.aud ?? it.classroom ?? it['ауд'] ?? "").toString();
+  const getTeacher = it => (it.teacher ?? it.tutor ?? it.lecturer ?? it['преподаватель'] ?? "").toString();
+
+  function renderCards(items){
+    items.sort((a,b)=>(a.pair_number??a.pair)-(b.pair_number??b.pair));
+    listEl.innerHTML="";
+    items.forEach((it,idx)=>{
+      const subj=getSubject(it) || "—";
+      const pair=(it.pair_number ?? it.pair) || "—";
+      const start=it.time_start||"";
+      const end=it.time_end||"";
+      const room=getRoom(it) || "—";
+      const teacher=getTeacher(it) || "—";
+
+      const card=document.createElement('div');
+      card.className='card'+(idx%2?' alt':'');
+      card.innerHTML = `
+        <div class="line1">
+          <div class="subj">${subj}</div>
+          <div class="time">${start}${start&&end?'–':''}${end}</div>
+        </div>
+        <div class="meta">
+          <div class="pairNum">${pair}. пара</div>
+          <div class="muted"></div>
+        </div>
+        <div class="divider"></div>
+        <div class="room">${room.toString().toLowerCase()==='zoom'||room.toLowerCase()==='chilla'?'online':'Каб '}${room}</div>
+        <div class="teacher">${teacher}</div>
+      `;
+      listEl.appendChild(card);
+    });
+  }
+
+  async function renderWeekStrip(){
+    weekStripEl.innerHTML="";
+    const today=new Date();
+    where.textContent = `${fmtMonthRu(selectedDay)} • ${semWeekIndex(selectedDay)} неделя`;
+    prevBtn.disabled = semWeekIndex(weekStart) <= 1;
+    nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
+
+    for(let i=0;i<7;i++){
+      const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
+      const wrap=document.createElement('div'); wrap.className='dw';
+      const btn=document.createElement('button'); btn.className='d'+(sameDay(d,today)?' today':'')+(sameDay(d,selectedDay)?' sel':''); btn.textContent=d.getDate();
+      btn.onclick = async ()=>{ selectedDay=d; await updateDay(); };
+      const dots=document.createElement('div'); dots.className='dots';
+      wrap.appendChild(btn); wrap.appendChild(dots); weekStripEl.appendChild(wrap);
+      if(currentTeacher){
+        try{ const arr=await fetchDay(currentTeacher,d); dots.innerHTML=''; for(let j=0;j<(arr?.length||0);j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>'); }catch{}
+      }
+    }
+  }
+
+  async function updateDay(){
+    await renderWeekStrip();
+    const items = await fetchDay(currentTeacher, selectedDay);
+    renderCards(items);
+  }
+
+  /* ==== init ==== */
+  (async()=>{
+    if(selectedDay < SEM_START) selectedDay = new Date(SEM_START);
+    if(selectedDay > SEM_END)   selectedDay = new Date(SEM_END);
+    weekStart = mondayOf(selectedDay);
+
+    fetchTeachersToDatalist();
+
+    teacherInput.value = currentTeacher;
+    const applyTeacher = async ()=>{ currentTeacher=(teacherInput.value||"").trim(); localStorage.setItem('teacher',currentTeacher); await updateDay(); };
+    teacherInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyTeacher(); });
+    teacherInput.addEventListener('blur', applyTeacher);
+
+    prevBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()-7); if(semWeekIndex(n)>=1){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
+    nextBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()+7); if(semWeekIndex(n)<=SEM_WEEKS){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
+
+    await renderWeekStrip();
+    renderCards([]);
+    if(currentTeacher) await updateDay();
+  })();
+</script>
+</body>
+</html>

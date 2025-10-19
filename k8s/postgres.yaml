@@ -66,7 +66,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: gaarge/db:3.6
+        image: gaarge/db:4.0
         ports: [ { containerPort: 5432 } ]
         env:
           - { name: POSTGRES_USER,     value: "schedule_user" }

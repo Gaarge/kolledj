@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: gaarge/frontend:3.2
+        image: gaarge/frontend:4.5
         ports: [ { containerPort: 80 } ]
         readinessProbe: { httpGet: { path: /healthz, port: 80 }, initialDelaySeconds: 5, periodSeconds: 10 }
         livenessProbe: { httpGet: { path: /healthz, port: 80 }, initialDelaySeconds: 15, periodSeconds: 20 }

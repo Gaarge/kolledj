@@ -209,3 +209,65 @@ async def get_groups(current: CurrentUser = Depends(get_current_user)):
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT DISTINCT group_name FROM weekday_schedule ORDER BY 1;")
     return {"groups": [r["group_name"] for r in rows]}
+
+
+# ---------- Дополнения: поддержка расписания для преподавателей ----------
+
+@app.get("/api/teachers")
+async def get_teachers(current: CurrentUser = Depends(get_current_user)):
+    """
+    Вернуть список преподавателей из таблицы расписания.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT DISTINCT teacher FROM weekday_schedule WHERE teacher IS NOT NULL AND trim(teacher)<>'' ORDER BY 1;")
+    return {"teachers": [r["teacher"] for r in rows]}
+
+@app.get("/api/schedule_by_teacher", response_model=List[ScheduleItem])
+async def get_schedule_by_teacher(
+    response: Response,
+    current: CurrentUser = Depends(get_current_user),
+    teacher: str = Query(..., min_length=1, max_length=128, alias="teacher"),
+    date_: str = Query(..., alias="date", min_length=10, max_length=10),  # YYYY-MM-DD
+):
+    try:
+        d = Date.fromisoformat(date_)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
+
+    weekday = d.isoweekday()  # 1..7
+    if weekday == 7:
+        return []
+
+    parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+              id,
+              COALESCE(group_name,'')                    AS group_name,
+              weekday,
+              pair_number,
+              to_char(time_start,'HH24:MI')              AS time_start,
+              to_char(time_end,  'HH24:MI')              AS time_end,
+              COALESCE(subject,'')                       AS subject,
+              COALESCE(teacher,'')                       AS teacher,
+              COALESCE(room,'')                          AS room,
+              COALESCE(week_type,'all')                  AS week_type
+            FROM weekday_schedule
+            WHERE trim(teacher) = $1
+              AND weekday = $2
+              AND (COALESCE(week_type,'all') = 'all' OR COALESCE(week_type,'all') = $3)
+            ORDER BY pair_number
+            """,
+            teacher, weekday, parity
+        )
+
+    result = []
+    for r in rows:
+        item = dict(r)
+        item["date"] = d
+        result.append(item)
+    return result
