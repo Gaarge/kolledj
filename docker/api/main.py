@@ -121,6 +121,113 @@ async def login(body: LoginIn):
     return {"token": token, "role": row["role"], "username": row["username"]}
 
 
+# ---------- Хелпер: объединение базы и правок для группы+даты ----------
+async def merge_by_group_date(conn: asyncpg.Connection, group: str, d: Date, weekday: int, parity: str) -> List[dict]:
+    # База (weekday_schedule)
+    base_rows = await conn.fetch(
+        """
+        SELECT
+          s.id,
+          s.group_name,
+          s.weekday,
+          s.pair_number,
+          to_char(s.time_start,'HH24:MI') AS time_start,
+          to_char(s.time_end,  'HH24:MI') AS time_end,
+          COALESCE(s.subject,'')          AS subject,
+          COALESCE(s.teacher,'')          AS teacher,
+          COALESCE(s.room,'')             AS room,
+          COALESCE(s.week_type,'all')     AS week_type
+        FROM weekday_schedule s
+        WHERE
+          regexp_replace(
+            lower(translate(s.group_name,
+              'ABCEHKMOPTXYabcehkmoptxy',
+              'АВСЕНКМОРТХУавсенкмортху'
+            )),
+            '[^0-9a-zа-яё]+','', 'g'
+          ) = regexp_replace(
+                lower(translate($1,
+                  'ABCEHKMOPTXYabcehkmoptxy',
+                  'АВСЕНКМОРТХУавсенкмортху'
+                )),
+                '[^0-9a-zа-яё]+','', 'g'
+              )
+          AND s.weekday = $2
+          AND (COALESCE(s.week_type,'all') = 'all' OR COALESCE(s.week_type,'all') = $3)
+        ORDER BY s.pair_number ASC
+        """,
+        group, weekday, parity
+    )
+
+    # Шаблонные правки (weekly)
+    weekly_rows = await conn.fetch(
+        """
+        SELECT pair_number, subject, teacher, room, time_start, time_end, deleted
+        FROM weekly_edits
+        WHERE group_name = $1
+          AND day_of_week = $2
+          AND (week_type = 'all' OR week_type = $3)
+        """,
+        group, weekday, parity
+    )
+
+    # Разовые правки (once)
+    once_rows = await conn.fetch(
+        """
+        SELECT pair_number, subject, teacher, room, time_start, time_end, deleted
+        FROM once_edits
+        WHERE group_name = $1
+          AND edit_date  = $2
+        """,
+        group, d
+    )
+
+    by_pair: dict[int, dict] = {}
+    for r in base_rows:
+        by_pair[int(r["pair_number"])] = {
+            "id": r["id"],
+            "group_name": r["group_name"],
+            "weekday": r["weekday"],
+            "pair_number": int(r["pair_number"]),
+            "time_start": r["time_start"] or "",
+            "time_end": r["time_end"] or "",
+            "subject": r["subject"] or "",
+            "teacher": r["teacher"] or "",
+            "room": r["room"] or "",
+            "week_type": r["week_type"] or "all",
+        }
+
+    def overlay(rows):
+        for e in rows:
+            p = int(e["pair_number"])
+            prev = by_pair.get(p, {
+                "id": 0, "group_name": group, "weekday": weekday, "pair_number": p,
+                "time_start": "", "time_end": "", "subject": "", "teacher": "", "room": "",
+                "week_type": "all"
+            })
+            if e["deleted"]:
+                by_pair[p] = {
+                    **prev,
+                    "subject": "",
+                    "teacher": "",
+                    "room": ""
+                }
+                if e.get("time_start"): by_pair[p]["time_start"] = e["time_start"]
+                if e.get("time_end"):   by_pair[p]["time_end"]   = e["time_end"]
+            else:
+                if e.get("subject"):    prev["subject"]    = e["subject"]
+                if e.get("teacher"):    prev["teacher"]    = e["teacher"]
+                if e.get("room"):       prev["room"]       = e["room"]
+                if e.get("time_start"): prev["time_start"] = e["time_start"]
+                if e.get("time_end"):   prev["time_end"]   = e["time_end"]
+                by_pair[p] = prev
+
+    overlay(weekly_rows)
+    overlay(once_rows)
+
+    return [by_pair[k] for k in sorted(by_pair.keys()) if k > 0]
+
+
 @app.get("/api/schedule", response_model=List[ScheduleItem])
 async def get_schedule(
     response: Response,
@@ -146,115 +253,9 @@ async def get_schedule(
     else:
         parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
 
-    # NB: Больше НЕТ return [] для teacher/admin — все роли получают расписание по group/date
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # База (weekday_schedule)
-        base_rows = await conn.fetch(
-            """
-            SELECT
-              s.id,
-              s.group_name,
-              s.weekday,
-              s.pair_number,
-              to_char(s.time_start,'HH24:MI') AS time_start,
-              to_char(s.time_end,  'HH24:MI') AS time_end,
-              COALESCE(s.subject,'')          AS subject,
-              COALESCE(s.teacher,'')          AS teacher,
-              COALESCE(s.room,'')             AS room,
-              COALESCE(s.week_type,'all')     AS week_type
-            FROM weekday_schedule s
-            WHERE
-              regexp_replace(
-                lower(translate(s.group_name,
-                  'ABCEHKMOPTXYabcehkmoptxy',
-                  'АВСЕНКМОРТХУавсенкмортху'
-                )),
-                '[^0-9a-zа-яё]+','', 'g'
-              ) = regexp_replace(
-                    lower(translate($1,
-                      'ABCEHKMOPTXYabcehkmoptxy',
-                      'АВСЕНКМОРТХУавсенкмортху'
-                    )),
-                    '[^0-9a-zа-яё]+','', 'g'
-                  )
-              AND s.weekday = $2
-              AND (COALESCE(s.week_type,'all') = 'all' OR COALESCE(s.week_type,'all') = $3)
-            ORDER BY s.pair_number ASC
-            """,
-            group, weekday, parity
-        )
-
-        # Шаблонные правки (weekly)
-        weekly_rows = await conn.fetch(
-            """
-            SELECT pair_number, subject, teacher, room, time_start, time_end, deleted
-            FROM weekly_edits
-            WHERE group_name = $1
-              AND day_of_week = $2
-              AND (week_type = 'all' OR week_type = $3)
-            """,
-            group, weekday, parity
-        )
-
-        # Разовые правки (once)
-        once_rows = await conn.fetch(
-            """
-            SELECT pair_number, subject, teacher, room, time_start, time_end, deleted
-            FROM once_edits
-            WHERE group_name = $1
-              AND edit_date  = $2
-            """,
-            group, d
-        )
-
-    # Слить по pair_number: база -> weekly -> once
-    by_pair = {}
-    for r in base_rows:
-        by_pair[int(r["pair_number"])] = {
-            "id": r["id"],
-            "group_name": r["group_name"],
-            "weekday": r["weekday"],
-            "pair_number": int(r["pair_number"]),
-            "time_start": r["time_start"] or "",
-            "time_end": r["time_end"] or "",
-            "subject": r["subject"] or "",
-            "teacher": r["teacher"] or "",
-            "room": r["room"] or "",
-            "week_type": r["week_type"] or "all",
-        }
-
-    def overlay(rows):
-        for e in rows:
-            p = int(e["pair_number"])
-            prev = by_pair.get(p, {
-                "id": 0, "group_name": group, "weekday": weekday, "pair_number": p,
-                "time_start": "", "time_end": "", "subject": "", "teacher": "", "room": "",
-                "week_type": "all"
-            })
-            if e["deleted"]:
-                # очистить пару (сохраняем время, если уже есть)
-                by_pair[p] = {
-                    **prev,
-                    "subject": "",
-                    "teacher": "",
-                    "room": ""
-                }
-                if e.get("time_start"): by_pair[p]["time_start"] = e["time_start"]
-                if e.get("time_end"):   by_pair[p]["time_end"]   = e["time_end"]
-            else:
-                # частичное обновление
-                if e.get("subject"):    prev["subject"]    = e["subject"]
-                if e.get("teacher"):    prev["teacher"]    = e["teacher"]
-                if e.get("room"):       prev["room"]       = e["room"]
-                if e.get("time_start"): prev["time_start"] = e["time_start"]
-                if e.get("time_end"):   prev["time_end"]   = e["time_end"]
-                by_pair[p] = prev
-
-    overlay(weekly_rows)
-    overlay(once_rows)
-
-    result = [by_pair[k] for k in sorted(by_pair.keys()) if k > 0]
+        result = await merge_by_group_date(conn, group, d, weekday, parity)
     return result
 
     
@@ -290,42 +291,71 @@ async def get_schedule_by_teacher(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
 
-    weekday = d.isoweekday()  # 1..7
-    if weekday == 7:
-        return []
+    weekday = d.isoweekday()  # 1..7 (Пн=1..Вс=7)
+    anchor_str = os.getenv('ODD_WEEK_ANCHOR')
+    if anchor_str:
+        try:
+            anchor = Date.fromisoformat(anchor_str)
+            delta_days = (d - anchor).days
+            parity = 'odd' if (delta_days // 7) % 2 == 0 else 'even'
+        except Exception:
+            parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
+    else:
+        parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
 
-    parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
+    teacher_norm = (teacher or "").strip().lower()
+    if not teacher_norm:
+        return []
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
+        # 1) кандидаты групп из базы (на этот weekday+parity по текущему teacher)
+        base_groups = await conn.fetch(
             """
-            SELECT
-              id,
-              COALESCE(group_name,'')                    AS group_name,
-              weekday,
-              pair_number,
-              to_char(time_start,'HH24:MI')              AS time_start,
-              to_char(time_end,  'HH24:MI')              AS time_end,
-              COALESCE(subject,'')                       AS subject,
-              COALESCE(teacher,'')                       AS teacher,
-              COALESCE(room,'')                          AS room,
-              COALESCE(week_type,'all')                  AS week_type
+            SELECT DISTINCT group_name
             FROM weekday_schedule
-            WHERE trim(teacher) = $1
-              AND weekday = $2
-              AND (COALESCE(week_type,'all') = 'all' OR COALESCE(week_type,'all') = $3)
-            ORDER BY pair_number
+            WHERE weekday = $1
+              AND (COALESCE(week_type,'all')='all' OR COALESCE(week_type,'all')=$2)
+              AND lower(trim(teacher)) = lower($3)
             """,
-            teacher, weekday, parity
+            weekday, parity, teacher
         )
+        groups_set = {r["group_name"] for r in base_groups}
 
-    result = []
-    for r in rows:
-        item = dict(r)
-        item["date"] = d
-        result.append(item)
-    return result
+        # 2) кандидаты групп из шаблонных правок (weekly) — если в них teacher совпадает
+        weekly_groups = await conn.fetch(
+            """
+            SELECT DISTINCT group_name
+            FROM weekly_edits
+            WHERE day_of_week = $1
+              AND (week_type='all' OR week_type=$2)
+              AND lower(COALESCE(teacher,'')) = lower($3)
+            """,
+            weekday, parity, teacher
+        )
+        groups_set.update(r["group_name"] for r in weekly_groups)
+
+        # 3) кандидаты групп из разовых правок (once) на конкретную дату
+        once_groups = await conn.fetch(
+            """
+            SELECT DISTINCT group_name
+            FROM once_edits
+            WHERE edit_date = $1
+              AND lower(COALESCE(teacher,'')) = lower($2)
+            """,
+            d, teacher
+        )
+        groups_set.update(r["group_name"] for r in once_groups)
+
+        # 4) для каждой группы строим итог по алгоритму, затем фильтруем по teacher
+        merged_all: List[dict] = []
+        for g in groups_set:
+            merged_all.extend(await merge_by_group_date(conn, g, d, weekday, parity))
+
+    # финальная фильтрация по преподавателю — уже ПОСЛЕ наложения правок
+    filtered = [it for it in merged_all if (it.get("teacher") or "").strip().lower() == teacher_norm]
+    filtered.sort(key=lambda x: (x.get("pair_number") or 0, x.get("time_start") or ""))
+    return filtered
 
 
 def require_admin(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
