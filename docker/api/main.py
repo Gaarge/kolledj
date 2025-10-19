@@ -126,16 +126,15 @@ async def get_schedule(
     response: Response,
     current: CurrentUser = Depends(get_current_user),
     group: str = Query(..., min_length=1, max_length=64, alias="group"),
-    date_: str = Query(..., alias="date", min_length=10, max_length=10),  # YYYY-MM-DD
+    date_: str = Query(..., alias="date", min_length=10, max_length=10),
 ):
-    # --- расчёт даты/дня недели/чётности ---
+    # дата + ISO-день недели + чётность
     try:
         d = Date.fromisoformat(date_)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
 
     weekday = d.isoweekday()  # Пн=1..Вс=7
-    # чётность недели (якорь можно задать через ODD_WEEK_ANCHOR, по умолчанию ISO):
     anchor_str = os.getenv('ODD_WEEK_ANCHOR')
     if anchor_str:
         try:
@@ -147,16 +146,11 @@ async def get_schedule(
     else:
         parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
 
-    # --- простые заглушки по ролям ---
-    if current.role == "teacher":
-        return []  # TODO: позже вернуть пары текущего преподавателя
-    if current.role == "admin":
-        return []  # TODO: позже сделать обзор по всем группам
-
-    # --- выборка для студента (или дефолт) ---
+    # NB: Больше НЕТ return [] для teacher/admin — все роли получают расписание по group/date
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
+        # База (weekday_schedule)
+        base_rows = await conn.fetch(
             """
             SELECT
               s.id,
@@ -168,11 +162,9 @@ async def get_schedule(
               COALESCE(s.subject,'')          AS subject,
               COALESCE(s.teacher,'')          AS teacher,
               COALESCE(s.room,'')             AS room,
-              COALESCE(s.week_type,'all')     AS week_type,
-              ''::text                        AS session_type
+              COALESCE(s.week_type,'all')     AS week_type
             FROM weekday_schedule s
             WHERE
-              -- нормализуем и сравниваем имя группы (латиница->кириллица, lower, убрать лишние символы):
               regexp_replace(
                 lower(translate(s.group_name,
                   'ABCEHKMOPTXYabcehkmoptxy',
@@ -190,19 +182,82 @@ async def get_schedule(
               AND (COALESCE(s.week_type,'all') = 'all' OR COALESCE(s.week_type,'all') = $3)
             ORDER BY s.pair_number ASC
             """,
-            group,   # $1
-            weekday, # Пн=1..Вс=7  ($2)
-            parity   # 'odd' / 'even'           ($3)
+            group, weekday, parity
         )
-        
 
-    result = []
-    for r in rows:
-        item = dict(r)
-        item["date"] = d
-        result.append(item)
+        # Шаблонные правки (weekly)
+        weekly_rows = await conn.fetch(
+            """
+            SELECT pair_number, subject, teacher, room, time_start, time_end, deleted
+            FROM weekly_edits
+            WHERE group_name = $1
+              AND day_of_week = $2
+              AND (week_type = 'all' OR week_type = $3)
+            """,
+            group, weekday, parity
+        )
+
+        # Разовые правки (once)
+        once_rows = await conn.fetch(
+            """
+            SELECT pair_number, subject, teacher, room, time_start, time_end, deleted
+            FROM once_edits
+            WHERE group_name = $1
+              AND edit_date  = $2
+            """,
+            group, d
+        )
+
+    # Слить по pair_number: база -> weekly -> once
+    by_pair = {}
+    for r in base_rows:
+        by_pair[int(r["pair_number"])] = {
+            "id": r["id"],
+            "group_name": r["group_name"],
+            "weekday": r["weekday"],
+            "pair_number": int(r["pair_number"]),
+            "time_start": r["time_start"] or "",
+            "time_end": r["time_end"] or "",
+            "subject": r["subject"] or "",
+            "teacher": r["teacher"] or "",
+            "room": r["room"] or "",
+            "week_type": r["week_type"] or "all",
+        }
+
+    def overlay(rows):
+        for e in rows:
+            p = int(e["pair_number"])
+            prev = by_pair.get(p, {
+                "id": 0, "group_name": group, "weekday": weekday, "pair_number": p,
+                "time_start": "", "time_end": "", "subject": "", "teacher": "", "room": "",
+                "week_type": "all"
+            })
+            if e["deleted"]:
+                # очистить пару (сохраняем время, если уже есть)
+                by_pair[p] = {
+                    **prev,
+                    "subject": "",
+                    "teacher": "",
+                    "room": ""
+                }
+                if e.get("time_start"): by_pair[p]["time_start"] = e["time_start"]
+                if e.get("time_end"):   by_pair[p]["time_end"]   = e["time_end"]
+            else:
+                # частичное обновление
+                if e.get("subject"):    prev["subject"]    = e["subject"]
+                if e.get("teacher"):    prev["teacher"]    = e["teacher"]
+                if e.get("room"):       prev["room"]       = e["room"]
+                if e.get("time_start"): prev["time_start"] = e["time_start"]
+                if e.get("time_end"):   prev["time_end"]   = e["time_end"]
+                by_pair[p] = prev
+
+    overlay(weekly_rows)
+    overlay(once_rows)
+
+    result = [by_pair[k] for k in sorted(by_pair.keys()) if k > 0]
     return result
 
+    
 @app.get("/api/groups")
 async def get_groups(current: CurrentUser = Depends(get_current_user)):
     pool = await get_pool()
@@ -271,3 +326,93 @@ async def get_schedule_by_teacher(
         item["date"] = d
         result.append(item)
     return result
+
+
+def require_admin(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if current.role != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+    return current
+
+class OnceEditIn(BaseModel):
+    group: str
+    date: str           # YYYY-MM-DD
+    pair: int
+    subject: str | None = None
+    teacher: str | None = None
+    room: str | None = None
+    time_start: str | None = None
+    time_end: str | None = None
+    deleted: bool = False
+
+class WeeklyEditIn(BaseModel):
+    group: str
+    day_of_week: int    # 1..7 ISO
+    pair: int
+    scope: str = "all"  # all/even/odd
+    subject: str | None = None
+    teacher: str | None = None
+    room: str | None = None
+    time_start: str | None = None
+    time_end: str | None = None
+    deleted: bool = False
+
+@app.post("/api/edits/once")
+async def upsert_once_edit(body: OnceEditIn, current: CurrentUser = Depends(require_admin)):
+    try:
+        edit_date = Date.fromisoformat(body.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'date'")
+    if body.pair <= 0:
+        raise HTTPException(status_code=400, detail="pair>0")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("""
+                DELETE FROM once_edits
+                 WHERE group_name=$1 AND edit_date=$2 AND pair_number=$3
+            """, body.group, edit_date, body.pair)
+            await conn.execute("""
+                INSERT INTO once_edits
+                  (group_name, edit_date, pair_number, subject, teacher, room, time_start, time_end, deleted)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            """, body.group, edit_date, body.pair,
+                 body.subject, body.teacher, body.room, body.time_start, body.time_end, body.deleted)
+    return {"ok": True}
+
+@app.delete("/api/edits/once")
+async def delete_once_for_day(
+    group: str = Query(..., min_length=1),
+    date: str = Query(..., min_length=10, max_length=10),
+    current: CurrentUser = Depends(require_admin),
+):
+    try:
+        edit_date = Date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'date'")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM once_edits WHERE group_name=$1 AND edit_date=$2", group, edit_date)
+    return {"ok": True}
+
+@app.post("/api/edits/weekly")
+async def upsert_weekly_edit(body: WeeklyEditIn, current: CurrentUser = Depends(require_admin)):
+    if body.pair <= 0 or not (1 <= body.day_of_week <= 7):
+        raise HTTPException(status_code=400, detail="bad pair/day_of_week")
+    scope = (body.scope or "all").lower()
+    if scope not in ("all","even","odd"):
+        scope = "all"
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("""
+                DELETE FROM weekly_edits
+                 WHERE group_name=$1 AND day_of_week=$2 AND pair_number=$3 AND week_type=$4
+            """, body.group, body.day_of_week, body.pair, scope)
+            await conn.execute("""
+                INSERT INTO weekly_edits
+                  (group_name, day_of_week, pair_number, week_type, subject, teacher, room, time_start, time_end, deleted)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            """, body.group, body.day_of_week, body.pair, scope,
+                 body.subject, body.teacher, body.room, body.time_start, body.time_end, body.deleted)
+    return {"ok": True}

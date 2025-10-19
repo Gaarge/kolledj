@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Расписание на день</title>
+    <style>
+        :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
+        *{box-sizing:border-box}
+        body{margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
+            font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+
+        .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+            padding:.6rem 1rem;background:linear-gradient(180deg,#515376FF,#6d6d8a);
+            border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)}
+        .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem}
+        .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85}
+        .tab.sel{background:#ffffff22;opacity:1}
+        .grow{flex:1}
+        .grp{display:inline-flex;gap:.4rem;align-items:center}
+        .grp label{font-weight:700;opacity:.85}
+        input[type="text"]{
+            appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
+            padding:.35rem .6rem;min-width:12rem;outline:none;
+        }
+        input[type="text"]::placeholder{color:#d0dbff88}
+
+        .wrap{padding:1rem;max-width:1100px;margin:0 auto}
+
+        /* навигация недели */
+        .weeknav{display:flex;align-items:center;justify-content:space-between;padding:0 1rem .5rem}
+        .navbtn{background:transparent;border:none;color:var(--fg);font-size:1.25rem;cursor:pointer;padding:.35rem .5rem;border-radius:.5rem;line-height:1}
+        .navbtn[disabled]{opacity:.4;cursor:not-allowed}
+        .where{opacity:.9;font-weight:800}
+
+        /* полоса дней недели */
+        .weekstrip{display:flex;gap:.5rem;align-items:flex-end;justify-content:space-between;padding:.35rem 1rem .75rem;border-bottom:1px solid var(--grid)}
+        .dw{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:38px}
+        .d{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:transparent;border:1px solid #ffffff33;color:var(--fg);font-weight:700}
+        .d.today{border-color:var(--accent)} .d.sel{background:#ffffff22;border-color:#ffffff55}
+        .dots{display:flex;gap:3px;flex-wrap:wrap;justify-content:center;min-height:6px}
+        .dot{width:6px;height:6px;border-radius:50%;background:#ffd24d}
+
+        /* карточки занятий — макет */
+        .list{padding:1rem;display:flex;flex-direction:column;gap:.75rem}
+        .card{
+            border:1px solid var(--grid);border-radius:16px;padding:.9rem 1rem;background:var(--card);
+            display:flex;flex-direction:column;gap:.5rem;position:relative;cursor:pointer
+        }
+        .card.alt{background:var(--card2)}
+        .line1{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+        .subj{font-weight:800;font-size:1.35rem;line-height:1.2;letter-spacing:.2px}
+        .meta{display:flex;align-items:center;justify-content:space-between;gap:1rem;font-weight:700;opacity:.9}
+        .pairNum{font-size:1rem}
+        .time{font-size:1rem;white-space:nowrap}
+        .divider{height:1px;background:rgba(255,255,255,.08); margin:.2rem 0 .35rem}
+        .room,.teacher{opacity:.9}
+        .room{font-weight:700}
+        .muted{opacity:.65}
+        .edited-badge{position:absolute;top:8px;right:8px;font-size:.7rem;opacity:.9;border:1px solid #7fb3ff66;background:#7fb3ff22;border-radius:.4rem;padding:.05rem .35rem}
+
+        /* editbar */
+        .editbar{padding:0 1rem 1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+        .btn{background:#ffffff18;border:1px solid #ffffff33;color:#fff;border-radius:.6rem;padding:.28rem .55rem;font-weight:700;cursor:pointer}
+        .btn:hover{background:#ffffff25}
+        .btn.danger{border-color:#ff7b7b88;background:#ff7b7b22}
+        .chip{font-size:.75rem;opacity:.9;border:1px solid #ffffff33;border-radius:.5rem;padding:.1rem .4rem}
+
+        /* modal */
+        .modal-backdrop{position:fixed;inset:0;background:#0008;display:none;place-items:center;z-index:50}
+        .modal{background:#45476a;color:#fff;border:1px solid #ffffff33;border-radius:14px;min-width:280px;max-width:520px;width:92vw;padding:1rem;box-shadow:0 10px 30px #0007}
+        .modal h3{margin:.25rem 0 1rem;font-size:1.05rem}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+        .grid label{font-size:.85rem;opacity:.9}
+        .grid input{width:100%;appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.5rem;color:#fff;padding:.4rem .55rem;outline:none}
+        .modal .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem}
+    </style>
+</head>
+<body>
+<div class="topbar">
+    <div class="tabs">
+        <a class="tab sel" href="/day.html">День</a>
+        <a class="tab" href="/week.html">Неделя</a>
+    </div>
+    <div class="grow"></div>
+    <div class="grp">
+        <label for="groupInput">Группа</label>
+        <input id="groupInput" type="text" placeholder="например, ОИ21-09" list="groupsList" />
+        <datalist id="groupsList"></datalist>
+    </div>
+</div>
+
+<div class="wrap">
+    <div class="weeknav">
+        <button class="navbtn" id="prevWeek" aria-label="Предыдущая неделя">⟵</button>
+        <div class="where" id="where"></div>
+        <button class="navbtn" id="nextWeek" aria-label="Следующая неделя">⟶</button>
+    </div>
+
+    <div class="weekstrip" id="weekStrip" aria-label="Неделя"></div>
+
+    <div class="list" id="pairsList"></div>
+
+    <div class="editbar">
+        <span class="chip">Клик по карточке — редактировать</span>
+        <button class="btn" id="addPairBtn">Добавить/заменить…</button>
+        <button class="btn danger" id="resetDayBtn">Сбросить правки дня</button>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования -->
+<div class="modal-backdrop" id="modal">
+    <div class="modal" role="dialog" aria-modal="true">
+        <h3 id="modalTitle">Редактировать пару</h3>
+        <div class="grid">
+            <div>
+                <label>Предмет</label>
+                <input id="f_subject" type="text" placeholder="Математика" />
+            </div>
+            <div>
+                <label>Аудитория</label>
+                <input id="f_room" type="text" placeholder="305" />
+            </div>
+            <div>
+                <label>Преподаватель</label>
+                <input id="f_teacher" type="text" placeholder="Иванова И.И." />
+            </div>
+            <div>
+                <label>Номер пары</label>
+                <input id="f_pair" type="number" min="1" max="20" />
+            </div>
+            <div>
+                <label>Начало</label>
+                <input id="f_start" type="time" />
+            </div>
+            <div>
+                <label>Окончание</label>
+                <input id="f_end" type="time" />
+            </div>
+        </div>
+        <!-- режим сохранения правок -->
+        <div style="margin:.6rem 0 .25rem;display:flex;gap:1rem;align-items:center">
+            <strong style="font-size:.9rem">Сохранить как:</strong>
+            <label style="display:inline-flex;gap:.35rem;align-items:center"><input type="radio" name="scope" id="scope_once" checked> разово (на дату)</label>
+            <label style="display:inline-flex;gap:.35rem;align-items:center"><input type="radio" name="scope" id="scope_weekly"> еженедельно (этот день недели)</label>
+        </div>
+        <div class="actions">
+            <button class="btn danger" id="deleteBtn">Очистить пару</button>
+            <div style="flex:1"></div>
+            <button class="btn" id="cancelBtn">Отмена</button>
+            <button class="btn" id="saveBtn">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    /* ==== Константы семестра ==== */
+    const SEM_START=new Date(2025,8,1), SEM_WEEKS=16;
+    const SEM_END=new Date(+SEM_START+(SEM_WEEKS*7-1)*24*3600*1000);
+
+    /* ==== утилиты дат ==== */
+    const pad=n=>String(n).padStart(2,'0');
+    const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const mondayOf=date=>{const d=new Date(date); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd); d.setHours(0,0,0,0); return d;};
+    const sameDay=(a,b)=> a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+    const fmtMonthRu=d=>["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"][d.getMonth()]+" "+d.getFullYear();
+    const semWeekIndex=date=>{const diff=Math.floor((mondayOf(date)-mondayOf(SEM_START))/(7*24*3600*1000)); return diff+1;};
+
+    /* ==== элементы ==== */
+    const weekStripEl=document.getElementById('weekStrip');
+    const listEl=document.getElementById('pairsList');
+    const where=document.getElementById('where');
+    const groupInput=document.getElementById('groupInput');
+    const groupsList=document.getElementById('groupsList');
+    const prevBtn=document.getElementById('prevWeek');
+    const nextBtn=document.getElementById('nextWeek');
+    const addPairBtn=document.getElementById('addPairBtn');
+    const resetDayBtn=document.getElementById('resetDayBtn');
+	// JWT из localStorage/sessionStorage (его отдал /api/login)
+	const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+	const authHeaders = () => ({ 'Authorization': `Bearer ${getToken()}` });
+	
+    // modal refs
+    const modal=document.getElementById('modal');
+    const f_subject=document.getElementById('f_subject');
+    const f_room=document.getElementById('f_room');
+    const f_teacher=document.getElementById('f_teacher');
+    const f_pair=document.getElementById('f_pair');
+    const f_start=document.getElementById('f_start');
+    const f_end=document.getElementById('f_end');
+    const saveBtn=document.getElementById('saveBtn');
+    const cancelBtn=document.getElementById('cancelBtn');
+    const deleteBtn=document.getElementById('deleteBtn');
+    const scopeOnce=document.getElementById('scope_once');
+    const scopeWeekly=document.getElementById('scope_weekly');
+    const modalTitle=document.getElementById('modalTitle');
+
+    /* ==== состояние ==== */
+    let selectedDay=new Date();
+    let weekStart=mondayOf(selectedDay);
+    let currentGroup=localStorage.getItem('group')||"";
+    let lastScope = localStorage.getItem('lastScope') || 'once';
+
+    // === Авторизация на странице ===
+    (function(){
+      const token = localStorage.getItem('token');
+      const role  = localStorage.getItem('role');
+      if (!token) { window.location.href = 'index.html'; return; }
+      if (role !== 'admin') { window.location.href = 'menu.html'; return; }
+      window.__AUTH_TOKEN__ = token;
+    })();
+
+
+    /* ==== API ==== */
+    async function fetchGroupsToDatalist(){
+        try{
+          const r = await fetch('/api/groups', { cache:'no-store', headers: authHeaders() });
+          
+          if (r.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('role');
+            localStorage.removeItem('username');
+            window.location.href = 'index.html';
+            return;
+          }
+          
+          if(!r.ok) return;
+          const data=await r.json();
+          const arr=Array.isArray(data)?data:(data.groups||[]);
+          groupsList.innerHTML = arr.map(g=>`<option value="${g}"/>`).join('');
+        }catch{}
+      }
+      async function fetchDay(group,date){
+        if(!group) return [];
+        const r = await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`, {
+          cache:'no-store',
+          headers: authHeaders()
+        });
+        
+        if (r.status === 401) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('role');
+          localStorage.removeItem('username');
+          window.location.href = 'index.html';
+          return [];
+        }
+        
+        if(!r.ok) return [];
+        return await r.json();
+      }
+
+    /* ==== helpers ==== */
+    const getSubject = it => {
+        const candidates = [ it.subject, it.name, it.discipline, it.title, it.course, it['дисциплина'], it['название'] ]
+            .filter(v => v && String(v).trim().length);
+        return (candidates[0]||"").toString().trim();
+    };
+    const getRoom = it => (it.room ?? it.aud ?? it.classroom ?? it['ауд'] ?? "").toString();
+    const getTeacher = it => (it.teacher ?? it.tutor ?? it.lecturer ?? it['преподаватель'] ?? "").toString();
+    const getPair = it => Number(it.pair_number ?? it.pair ?? 0) || 0;
+
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+
+    function renderCards(items){
+        items.sort((a,b)=>getPair(a)-getPair(b));
+        listEl.innerHTML="";
+        items.forEach((it,idx)=>{
+            const subj=getSubject(it) || "—";
+            const pair=getPair(it) || "—";
+            const start=it.time_start||"";
+            const end=it.time_end||"";
+            const room=getRoom(it) || "—";
+            const teacher=getTeacher(it) || "—";
+
+            const card=document.createElement('div');
+            card.className='card'+(idx%2?' alt':'');
+            card.dataset.pair = pair;
+            card.innerHTML = `
+        <div class="line1">
+          <div class="subj">${escapeHtml(subj) || '<span class="muted">—</span>'}</div>
+          <div class="time">${escapeHtml(start)}${start&&end?'–':''}${escapeHtml(end)}</div>
+        </div>
+        <div class="meta">
+          <div class="pairNum">${pair}. пара</div>
+          <div class="muted"></div>
+        </div>
+        <div class="divider"></div>
+        <div class="room">${String(room).toLowerCase()==='zoom'||String(room).toLowerCase()==='chilla'?'online':'Каб '}${escapeHtml(room)}</div>
+        <div class="teacher">${escapeHtml(teacher)}</div>
+      `;
+            card.title = `${subj||'—'}\nКаб: ${room||'—'}\nПреподаватель: ${teacher||'—'}`;
+            card.addEventListener('click', ()=> openEditor({
+                pair: getPair(it)||1,
+                subject: getSubject(it)||'',
+                room: getRoom(it)||'',
+                teacher: getTeacher(it)||'',
+                time_start: start,
+                time_end: end
+            }));
+            listEl.appendChild(card);
+        });
+    }
+
+    async function renderWeekStrip(){
+        weekStripEl.innerHTML="";
+        const today=new Date();
+        where.textContent = `${fmtMonthRu(selectedDay)} • ${semWeekIndex(selectedDay)} неделя`;
+        prevBtn.disabled = semWeekIndex(weekStart) <= 1;
+        nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
+
+        for(let i=0;i<7;i++){
+            const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
+            const wrap=document.createElement('div'); wrap.className='dw';
+            const btn=document.createElement('button'); btn.className='d'+(sameDay(d,today)?' today':'')+(sameDay(d,selectedDay)?' sel':''); btn.textContent=d.getDate();
+            btn.onclick = async ()=>{ selectedDay=d; await updateDay(); };
+            const dots=document.createElement('div'); dots.className='dots';
+            wrap.appendChild(btn); wrap.appendChild(dots); weekStripEl.appendChild(wrap);
+            if(currentGroup){
+                try{ const arr=await fetchDay(currentGroup,d); dots.innerHTML=''; for(let j=0;j<(arr?.length||0);j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>'); }catch{}
+            }
+        }
+    }
+
+    async function updateDay(){
+        await renderWeekStrip();
+        const merged = await fetchDay(currentGroup, selectedDay); // объединение делает сервер
+        renderCards(merged);
+    }
+
+    /* ==== Модальное редактирование пары ==== */
+    let editingPair = null; // номер пары
+    function openEditor(data){
+        editingPair = data?.pair || 1;
+        modal.style.display='grid';
+        modalTitle.textContent = `Пара №${editingPair}`;
+
+        f_subject.value = data?.subject || '';
+        f_room.value = data?.room || '';
+        f_teacher.value = data?.teacher || '';
+        f_pair.value = String(editingPair);
+        f_start.value = (data?.time_start || '').slice(0,5);
+        f_end.value = (data?.time_end || '').slice(0,5);
+
+        // восстановим последний выбор области сохранения
+        scopeOnce.checked = (lastScope !== 'weekly');
+        scopeWeekly.checked = (lastScope === 'weekly');
+
+        setTimeout(()=>f_subject.focus(),0);
+    }
+    function closeEditor(){ modal.style.display='none'; editingPair=null; }
+
+    cancelBtn.addEventListener('click', closeEditor);
+    modal.addEventListener('click', (e)=>{ if(e.target===modal) closeEditor(); });
+
+    saveBtn.addEventListener('click', ()=>{
+        const pair = Math.max(1, parseInt(f_pair.value||editingPair,10)||editingPair);
+        const patch = {
+            pair,
+            subject: (f_subject.value||'').trim(),
+            room: (f_room.value||'').trim(),
+            teacher: (f_teacher.value||'').trim(),
+            time_start: (f_start.value||'').trim(),
+            time_end: (f_end.value||'').trim()
+        };
+        const scope = scopeWeekly.checked ? 'weekly' : 'once';
+        lastScope = scope; localStorage.setItem('lastScope', lastScope);
+        persistPatch(patch, scope);
+        closeEditor();
+    });
+
+    deleteBtn.addEventListener('click', ()=>{
+        const pair = Math.max(1, parseInt(f_pair.value||editingPair,10)||editingPair);
+        const scope = scopeWeekly.checked ? 'weekly' : 'once';
+        persistPatch({ pair, __deleted:true }, scope);
+        closeEditor();
+    });
+
+    // ===== СЕРВЕРНЫЕ сохранения вместо localStorage =====
+    async function saveOncePatch(patch) {
+        const payload = {
+            group: (groupInput.value || "").trim(),
+            date: iso(selectedDay),
+            pair: patch.pair,
+            subject: patch.subject || null,
+            room: patch.room || null,
+            teacher: patch.teacher || null,
+            time_start: patch.time_start || null,
+            time_end: patch.time_end || null,
+            deleted: !!patch.__deleted
+        };
+        const r = await fetch('/api/edits/once', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(payload)
+        });
+        
+        if(!r.ok){ alert('Ошибка сохранения (разово)'); }
+    }
+
+    async function saveWeeklyPatch(patch) {
+        let scope = (window.prompt('Применить на недели: all (все) / even (чётные) / odd (нечётные)', 'all') || 'all').toLowerCase();
+        if (!['all','even','odd'].includes(scope)) scope = 'all';
+        const isoDow = (selectedDay.getDay() === 0 ? 7 : selectedDay.getDay()); // ISO: Пн=1..Вс=7
+        const payload = {
+            group: (groupInput.value || "").trim(),
+            day_of_week: isoDow,
+            pair: patch.pair,
+            subject: patch.subject || null,
+            room: patch.room || null,
+            teacher: patch.teacher || null,
+            time_start: patch.time_start || null,
+            time_end: patch.time_end || null,
+            deleted: !!patch.__deleted,
+            scope
+        };
+        const r = await fetch('/api/edits/weekly', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(payload)
+        });
+        
+        if(!r.ok){ alert('Ошибка сохранения (еженедельно)'); }
+    }
+
+    function persistPatch(patch, scope='once'){
+        (async () => {
+            if(scope==='weekly'){
+                await saveWeeklyPatch(patch);
+            } else {
+                await saveOncePatch(patch);
+            }
+            await updateDay(); // после записи перерисовываем из сервера
+        })();
+    }
+
+    // ===== Сброс разовых правок на выбранную дату =====
+    resetDayBtn.addEventListener('click', ()=>{
+        if(!currentGroup) return;
+        if(confirm('Сбросить все разовые правки для выбранной даты?')){
+            fetch(`/api/edits/once?group=${encodeURIComponent(currentGroup)}&date=${iso(selectedDay)}`, {
+              method: 'DELETE',
+              headers: authHeaders()
+            }).then(()=>updateDay());
+            
+        }
+    });
+
+    /* ==== init ==== */
+    (async()=>{
+        if(selectedDay < SEM_START) selectedDay = new Date(SEM_START);
+        if(selectedDay > SEM_END)   selectedDay = new Date(SEM_END);
+        weekStart = mondayOf(selectedDay);
+
+        fetchGroupsToDatalist();
+
+        groupInput.value = currentGroup;
+        const applyGroup = async ()=>{ currentGroup=(groupInput.value||"").trim(); localStorage.setItem('group',currentGroup); await updateDay(); };
+        groupInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyGroup(); });
+        groupInput.addEventListener('blur', applyGroup);
+
+        prevBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()-7); if(semWeekIndex(n)>=1){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
+        nextBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()+7); if(semWeekIndex(n)<=SEM_WEEKS){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
+
+        addPairBtn.addEventListener('click', ()=>{
+            openEditor({ pair:1, subject:'', room:'', teacher:'', time_start:'', time_end:'' });
+        });
+
+        await renderWeekStrip();
+        renderCards([]);
+        if(currentGroup) await updateDay();
+    })();
+</script>
+</body>
+</html>
