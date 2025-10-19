@@ -208,7 +208,12 @@
     where.textContent = `${fmtMonthRu(selectedDay)} • ${semWeekIndex(selectedDay)} неделя`;
     prevBtn.disabled = semWeekIndex(weekStart) <= 1;
     nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
-
+  
+    let overview = [];
+    if (currentGroup) {
+      overview = await fetchWeekOverview({ group: currentGroup, teacher: null, mondayDateObj: weekStart });
+    }
+  
     for(let i=0;i<7;i++){
       const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
       const wrap=document.createElement('div'); wrap.className='dw';
@@ -216,11 +221,12 @@
       btn.onclick = async ()=>{ selectedDay=d; await updateDay(); };
       const dots=document.createElement('div'); dots.className='dots';
       wrap.appendChild(btn); wrap.appendChild(dots); weekStripEl.appendChild(wrap);
-      if(currentGroup){
-        try{ const arr=await fetchDay(currentGroup,d); dots.innerHTML=''; for(let j=0;j<(arr?.length||0);j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>'); }catch{}
-      }
+  
+      const cnt = (overview.find(x => x.date === iso(d))?.count) || 0;
+      for(let j=0;j<cnt;j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>');
     }
   }
+  
 
   async function updateDay(){
     await renderWeekStrip();

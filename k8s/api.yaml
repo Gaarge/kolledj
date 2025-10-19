@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: gaarge/api:4.11
+        image: gaarge/api:5.1
         ports: [ { containerPort: 8000 } ]
         env:
           - name: ODD_WEEK_ANCHOR

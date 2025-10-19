@@ -71,7 +71,101 @@ async def get_current_user(authorization: str = Header(None)) -> CurrentUser:
         raise HTTPException(status_code=401, detail="Invalid token")
     return CurrentUser(id=data["id"], username=data["username"], role=data["role"])
 
+class WeekOverviewItem(BaseModel):
+    date: str   # YYYY-MM-DD
+    count: int  # сколько пар в этот день после наложения правок
 
+@app.get("/api/week_overview")
+async def week_overview(
+    current: CurrentUser = Depends(get_current_user),
+    group: Optional[str] = Query(None, min_length=1, max_length=128),
+    teacher: Optional[str] = Query(None, min_length=1, max_length=128),
+    monday: str = Query(..., min_length=10, max_length=10),  # понедельник недели YYYY-MM-DD
+):
+    # Разрешаем РОВНО один из параметров: либо group, либо teacher
+    if bool(group) == bool(teacher):
+        raise HTTPException(status_code=400, detail="Pass exactly one of 'group' or 'teacher'")
+
+    try:
+        m = Date.fromisoformat(monday)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'monday' (YYYY-MM-DD)")
+
+    pool = await get_pool()
+    out = []
+
+    async with pool.acquire() as conn:
+        for i in range(7):
+            d = m + timedelta(days=i)
+            weekday = d.isoweekday()  # 1..7
+
+            # тот же расчёт чётности
+            anchor_str = os.getenv('ODD_WEEK_ANCHOR')
+            if anchor_str:
+                try:
+                    anchor = Date.fromisoformat(anchor_str)
+                    delta_days = (d - anchor).days
+                    parity = 'odd' if (delta_days // 7) % 2 == 0 else 'even'
+                except Exception:
+                    parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
+            else:
+                parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
+
+            if group:
+                # Простой случай: одна группа
+                merged = await merge_by_group_date(conn, group, d, weekday, parity)
+                count = len(merged)
+            else:
+                # Случай преподавателя: группы могут отличаться на разных днях -> собираем динамически
+                teacher_norm = (teacher or "").strip().lower()
+
+                # кандидаты групп из базы
+                base_groups = await conn.fetch(
+                    """
+                    SELECT DISTINCT group_name
+                    FROM weekday_schedule
+                    WHERE weekday = $1
+                      AND (COALESCE(week_type,'all')='all' OR COALESCE(week_type,'all')=$2)
+                      AND lower(trim(teacher)) = lower($3)
+                    """, weekday, parity, teacher
+                )
+                groups_set = {r["group_name"] for r in base_groups}
+
+                # кандидаты из weekly правок
+                weekly_groups = await conn.fetch(
+                    """
+                    SELECT DISTINCT group_name
+                    FROM weekly_edits
+                    WHERE day_of_week = $1
+                      AND (week_type='all' OR week_type=$2)
+                      AND lower(COALESCE(teacher,'')) = lower($3)
+                    """, weekday, parity, teacher
+                )
+                groups_set.update(r["group_name"] for r in weekly_groups)
+
+                # кандидаты из once правок на текущую дату
+                once_groups = await conn.fetch(
+                    """
+                    SELECT DISTINCT group_name
+                    FROM once_edits
+                    WHERE edit_date = $1
+                      AND lower(COALESCE(teacher,'')) = lower($2)
+                    """, d, teacher
+                )
+                groups_set.update(r["group_name"] for r in once_groups)
+
+                # теперь считаем «точки» для этого дня:
+                # строим итог по каждой группе и считаем только пары, где учитель совпал ПОСЛЕ наложений
+                total = 0
+                for g in groups_set:
+                    merged = await merge_by_group_date(conn, g, d, weekday, parity)
+                    total += sum(1 for it in merged if (it.get("teacher") or "").strip().lower() == teacher_norm)
+
+                count = total
+
+            out.append({"date": d.isoformat(), "count": count})
+
+    return out
 
 @app.get("/healthz")
 async def healthz():
