@@ -1,11 +1,145 @@
 <!doctype html>
 <html lang="ru">
-  <head>
-    <meta charset="utf-8" />
-    <title>Расписание</title>
-    <meta http-equiv="refresh" content="0; url=/day.html">
-  </head>
-  <body>
-    <p><a href="/day.html">Перейти к расписанию</a></p>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Вход — КЭМС</title>
+  <style>
+    /* палитра и типографика как в week/day */
+    :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; display:grid; place-items:center; min-height:100%;
+      background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);
+      color:var(--fg);
+      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif
+    }
+
+    /* верхняя мини-шапка */
+    .topbar{
+      position:fixed; inset:0 auto auto 0; height:52px; width:100%;
+      display:flex; align-items:center; gap:.5rem; padding:.6rem 1rem;
+      background:linear-gradient(180deg,#515376FF,#6d6d8a);
+      border-bottom:1px solid var(--grid);
+      backdrop-filter:blur(6px) saturate(120%);
+    }
+    .brand{font-weight:900; letter-spacing:.4px; font-size:56px; margin:40px auto 0;}
+
+    /* центрированная карта логина */
+    .wrap{width:100%; padding:84px 16px 24px}
+    .card{max-width:420px; margin:0 auto; background:var(--card); border:1px solid var(--grid); border-radius:16px; box-shadow:0 8px 28px #0003}
+    .card-hd{padding:20px 20px 8px; border-bottom:1px solid var(--grid)}
+    .title{font-size:28px; font-weight:900; margin:0}
+    .subtitle{margin:4px 0 0 0; opacity:.9; font-weight:700}
+    .card-bd{padding:18px 20px 20px; display:flex; flex-direction:column; gap:12px}
+
+    label{font-weight:800; opacity:.9}
+    .txt{
+      appearance:none; background:#ffffff12; border:1px solid #ffffff33;
+      border-radius:10px; color:#fff; padding:10px 12px; outline:none; min-height:42px
+    }
+    .txt::placeholder{color:#d0dbff88}
+    .row{display:flex; flex-direction:column; gap:6px}
+
+    .btn{
+      width:100%; max-width:280px; display:block; margin:0 auto;
+      appearance:none; background:#ffffff22; border:1px solid #ffffff55; border-radius:12px;
+      color:#fff; font-weight:900; letter-spacing:.4px; cursor:pointer;
+      padding:10px 14px; min-height:46px
+    }
+    .btn:active{transform:translateY(1px)}
+
+    /* Резерв под сообщение – чтобы ничего не прыгало */
+    .msg{
+      display:block; text-align:center; margin-top:10px; min-height:20px; font-weight:700;
+    }
+
+    @media (min-width:640px){.title{font-size:32px}}
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">КЭМС</div>
+</div>
+
+<main class="wrap">
+  <section class="card" role="region" aria-labelledby="loginTitle">
+    <header class="card-hd">
+      <h1 id="loginTitle" class="title">Вход</h1>
+      <p class="subtitle">Дневник студента</p>
+    </header>
+
+    <div class="card-bd">
+      <form id="loginForm" novalidate>
+        <div class="row">
+          <label for="student_id">Номер студенческого билета</label>
+          <input class="txt" type="text" id="student_id" name="student_id" placeholder="например, 23-00123" autocomplete="username" required />
+        </div>
+
+        <div class="row">
+          <label for="password">Пароль</label>
+          <input class="txt" type="password" id="password" name="password" placeholder="пароль" autocomplete="current-password" required />
+        </div>
+
+        <div style="display:flex;justify-content:center;margin-top:20px">
+          <button class="btn" type="submit">Войти</button>
+        </div>
+      </form>
+
+      <!-- Сообщение под кнопкой, место зарезервировано заранее -->
+      <div class="msg" id="message" role="status" aria-live="polite"></div>
+    </div>
+  </section>
+</main>
+<script>
+  // Автологин: если токен уже есть — сразу в меню
+  (function(){
+    const token = localStorage.getItem('token');
+    if (token) {
+      window.location.href = 'menu.html';
+    }
+  })();
+
+  const form = document.getElementById('loginForm');
+  const message = document.getElementById('message');
+
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const username = form.student_id.value.trim(); // используем это поле как username
+    const password = form.password.value.trim();
+
+    if(!username || !password){
+      message.textContent = 'Заполните все поля!';
+      return;
+    }
+
+    try {
+      const r = await fetch('/api/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username, password })
+      });
+
+      if (!r.ok) {
+        const err = await r.json().catch(()=>({detail:'Ошибка входа'}));
+        message.textContent = err.detail || 'Ошибка входа';
+        return;
+      }
+
+      const data = await r.json();
+      // сохраняем токен и роль
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('role', data.role);
+      localStorage.setItem('username', data.username);
+
+      message.textContent = 'Вход выполнен!';
+      setTimeout(()=>{ window.location.href='menu.html'; }, 300);
+    } catch (e) {
+      message.textContent = 'Сеть недоступна или сервер не отвечает';
+    }
+  });
+</script>
+
+</body>
 </html>

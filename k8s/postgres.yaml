@@ -10,22 +10,49 @@ kind: ConfigMap
 metadata: { name: pg-init-sql }
 data:
   00_create_schema.sql: |
-    CREATE TABLE IF NOT EXISTS weekday_schedule (
-      id SERIAL PRIMARY KEY,
-      weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
-      pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
-      time_start TIME NOT NULL,
-      time_end   TIME NOT NULL,
-      subject    TEXT,
-      session_type VARCHAR(16),
-      room       VARCHAR(32),
-      teacher    TEXT,
-      group_name VARCHAR(32) NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT now(),
-      UNIQUE (group_name, weekday, pair_number)
-    );
-    CREATE INDEX IF NOT EXISTS idx_weekday_schedule_group_day
-      ON weekday_schedule (group_name, weekday);
+        -- ВАЖНО: этот файл рассчитан на пустую БД (первый старт тома)
+        -- Если БД уже есть, применяй вручную через psql.
+        
+        -- Расширение для bcrypt-хеширования
+        CREATE EXTENSION IF NOT EXISTS pgcrypto;
+        
+        -- Пользователи приложения
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('student','teacher','admin'))
+        );
+        
+        -- Нормализованное расписание (то, что реально использует API)
+        CREATE TABLE IF NOT EXISTS weekday_schedule (
+          id SERIAL PRIMARY KEY,
+          group_name TEXT NOT NULL,               -- имя группы, строкой как в Excel
+          weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7), -- Пн=1..Вс=7
+          pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
+          time_start TIME NOT NULL,
+          time_end   TIME NOT NULL,
+          subject    TEXT NOT NULL,
+          teacher    TEXT NOT NULL,
+          room       TEXT NOT NULL,
+          week_type  TEXT NOT NULL CHECK (week_type IN ('all','even','odd'))
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_ws_group_weekday
+          ON weekday_schedule (group_name, weekday);
+        -- Тестовые учётки (хешируются через pgcrypto/crypt)
+        INSERT INTO users (username, password_hash, role) VALUES
+        ('student1', crypt('studentpass', gen_salt('bf')), 'student')
+        ON CONFLICT (username) DO NOTHING;
+        
+        INSERT INTO users (username, password_hash, role) VALUES
+        ('teacher1', crypt('teacherpass', gen_salt('bf')), 'teacher')
+        ON CONFLICT (username) DO NOTHING;
+        
+        INSERT INTO users (username, password_hash, role) VALUES
+        ('admin1', crypt('adminpass', gen_salt('bf')), 'admin')
+        ON CONFLICT (username) DO NOTHING;
+        
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -39,7 +66,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: gaarge/db:2.6
+        image: gaarge/db:3.6
         ports: [ { containerPort: 5432 } ]
         env:
           - { name: POSTGRES_USER,     value: "schedule_user" }

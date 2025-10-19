@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Админ — Колледж</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      display: grid; place-items: center; min-height: 100dvh; background: #0f172a; color: #e2e8f0;
+    }
+    .card {
+      width: min(820px, 94vw);
+      background: #111827; border-radius: 16px; padding: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35); border: 1px solid #1f2937;
+    }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .title { font-size: 18px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #86efac; }
+    .muted { color: #9ca3af; font-size: 14px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #374151;
+      background: #111827; color: #fff; text-decoration: none; cursor: pointer;
+    }
+    .btn:hover { background: #0b1220; }
+    .grid {
+      margin-top: 16px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+    }
+    .tile { background: #0b1220; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }
+    .tile h3 { margin: 0 0 8px; font-size: 16px; color: #bbf7d0; }
+    .tile p { margin: 0; color: #9ca3af; font-size: 14px; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="title">Панель администратора</div>
+        <div class="muted" id="userLine"></div>
+      </div>
+      <div class="row" style="gap:8px">
+        <a class="btn" href="menu.html">Меню</a>
+        <button class="btn" onclick="logout()">Выйти</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="tile">
+        <h3>Управление расписаниями (скоро)</h3>
+        <p>Добавление/редактирование расписания по группам. Интерфейс в разработке.</p>
+      </div>
+      <div class="tile">
+        <h3>Пользователи</h3>
+        <p>Список пользователей и назначение ролей появятся здесь.</p>
+      </div>
+      <div class="tile">
+        <h3>Статистика</h3>
+        <p>Просмотр статистики использования приложения (просмотры, активность).</p>
+      </div>
+      <div class="tile">
+        <h3>Сервис</h3>
+        <p>Системный статус, миграции БД, проверка подключений — раздел в разработке.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // доступ только для админа
+    (function(){
+      const token = localStorage.getItem('token');
+      const role  = localStorage.getItem('role');
+      const user  = localStorage.getItem('username') || '';
+      if(!token || role!=='admin'){ window.location.href = 'menu.html'; return; }
+      const el = document.getElementById('userLine');
+      if(el) el.textContent = `Вы вошли как: ${user} (администратор)`;
+    })();
+
+    function logout(){
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+      localStorage.removeItem('username');
+      window.location.href = 'index.html';
+    }
+  </script>
+</body>
+</html>

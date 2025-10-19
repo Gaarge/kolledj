@@ -1,37 +1,77 @@
 import os
-from datetime import date as Date
-from typing import List
+from datetime import date as Date, datetime, timedelta
+from typing import List, Optional
 
 import asyncpg
-from fastapi import FastAPI, HTTPException, Query, Response
+import jwt
+from jwt import InvalidTokenError
+from fastapi import FastAPI, HTTPException, Query, Response, Depends, Header
 from pydantic import BaseModel
+
 
 APP_NAME = "schedule-api"
 DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql://user:pass@host:5432/db
 
+JWT_SECRET = os.getenv("SECRET_KEY", "dev-secret-change-me")
+JWT_ALGO = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRES_DAYS = int(os.getenv("JWT_EXPIRES_DAYS", "7"))
+
 app = FastAPI(title=APP_NAME, version="1.4.0")
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
 
 class ScheduleItem(BaseModel):
     id: int
-    date: Date
-    pair_number: int
-    time_start: str
-    time_end: str
-    subject: str
-    session_type: str
-    room: str
-    teacher: str
     group_name: str
+    weekday: int
+    pair_number: int
+    time_start: str   # строго строка "HH:MM"
+    time_end: str     # строго строка "HH:MM"
+    subject: str
+    teacher: str
+    room: str
+    week_type: str
 
-_pool = None
 
-async def get_pool():
+_pool: Optional[asyncpg.Pool] = None
+
+async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        if not DATABASE_URL:
-            raise RuntimeError("DATABASE_URL is not set")
         _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
     return _pool
+
+def make_token(payload: dict) -> str:
+    now = datetime.utcnow()
+    exp = now + timedelta(days=JWT_EXPIRES_DAYS)
+    to_encode = {
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        **payload
+    }
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+class CurrentUser(BaseModel):
+    id: int
+    username: str
+    role: str
+
+async def get_current_user(authorization: str = Header(None)) -> CurrentUser:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ", 1)[1]
+    try:
+        data = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    except InvalidTokenError:
+        # подпись не сошлась / токен протух / формат неверный
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return CurrentUser(id=data["id"], username=data["username"], role=data["role"])
+
+
 
 @app.get("/healthz")
 async def healthz():
@@ -60,64 +100,101 @@ NORMALIZE_SQL_EXPR = """
   )
 """
 
+
+@app.post("/api/login")
+async def login(body: LoginIn):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, username, role
+            FROM users
+            WHERE username = $1
+              AND password_hash = crypt($2, password_hash)
+            """,
+            body.username, body.password
+        )
+    if not row:
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    token = make_token({"id": row["id"], "username": row["username"], "role": row["role"]})
+    return {"token": token, "role": row["role"], "username": row["username"]}
+
+
 @app.get("/api/schedule", response_model=List[ScheduleItem])
 async def get_schedule(
     response: Response,
+    current: CurrentUser = Depends(get_current_user),
     group: str = Query(..., min_length=1, max_length=64, alias="group"),
     date_: str = Query(..., alias="date", min_length=10, max_length=10),  # YYYY-MM-DD
 ):
-    # день недели: Пн=1 .. Вс=7
+    # --- расчёт даты/дня недели/чётности ---
     try:
         d = Date.fromisoformat(date_)
-        weekday = d.isoweekday()
-        # определяем чётность недели
-        anchor_str = os.getenv('ODD_WEEK_ANCHOR', '2024-09-02')
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
+
+    weekday = d.isoweekday()  # Пн=1..Вс=7
+    # чётность недели (якорь можно задать через ODD_WEEK_ANCHOR, по умолчанию ISO):
+    anchor_str = os.getenv('ODD_WEEK_ANCHOR')
+    if anchor_str:
         try:
             anchor = Date.fromisoformat(anchor_str)
             delta_days = (d - anchor).days
-            weeks = delta_days // 7
-            parity = 'odd' if (weeks % 2 == 0) else 'even'  # неделя якоря считается нечётной
+            parity = 'odd' if (delta_days // 7) % 2 == 0 else 'even'  # якорная неделя — нечётная
         except Exception:
-            # запасной вариант — ISO-нумерация недель
             parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid 'date' (YYYY-MM-DD)")
+    else:
+        parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
 
+    # --- простые заглушки по ролям ---
+    if current.role == "teacher":
+        return []  # TODO: позже вернуть пары текущего преподавателя
+    if current.role == "admin":
+        return []  # TODO: позже сделать обзор по всем группам
+
+    # --- выборка для студента (или дефолт) ---
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"""
-            WITH inp AS ( SELECT {NORMALIZE_SQL_EXPR} AS g )
-            SELECT DISTINCT ON (s.pair_number)
-               s.id,
-               s.pair_number,
-               to_char(s.time_start,'HH24:MI') AS time_start,
-               to_char(s.time_end,'HH24:MI')   AS time_end,
-               COALESCE(s.subject,'')          AS subject,
-               COALESCE(s.session_type,'')     AS session_type,
-               COALESCE(s.room,'')             AS room,
-               COALESCE(s.teacher,'')          AS teacher,
-               s.group_name
-            FROM weekday_schedule s, inp
+            """
+            SELECT
+              s.id,
+              s.group_name,
+              s.weekday,
+              s.pair_number,
+              to_char(s.time_start,'HH24:MI') AS time_start,
+              to_char(s.time_end,  'HH24:MI') AS time_end,
+              COALESCE(s.subject,'')          AS subject,
+              COALESCE(s.teacher,'')          AS teacher,
+              COALESCE(s.room,'')             AS room,
+              COALESCE(s.week_type,'all')     AS week_type,
+              ''::text                        AS session_type
+            FROM weekday_schedule s
             WHERE
-              COALESCE(s.week_type,'all') IN ('all', $3)
-              AND
+              -- нормализуем и сравниваем имя группы (латиница->кириллица, lower, убрать лишние символы):
               regexp_replace(
-                lower(
-                  translate(
-                    s.group_name,
-                    'ABCEHKMOPTXYabcehkmoptxy',
-                    'АВСЕНКМОРТХУавсенкмортху'
-                  )
-                ),
+                lower(translate(s.group_name,
+                  'ABCEHKMOPTXYabcehkmoptxy',
+                  'АВСЕНКМОРТХУавсенкмортху'
+                )),
                 '[^0-9a-zа-яё]+','', 'g'
-              ) = inp.g
+              ) = regexp_replace(
+                    lower(translate($1,
+                      'ABCEHKMOPTXYabcehkmoptxy',
+                      'АВСЕНКМОРТХУавсенкмортху'
+                    )),
+                    '[^0-9a-zа-яё]+','', 'g'
+                  )
               AND s.weekday = $2
-            ORDER BY s.pair_number,
-              CASE COALESCE(s.week_type,'all') WHEN $3 THEN 0 WHEN 'all' THEN 1 ELSE 2 END
+              AND (COALESCE(s.week_type,'all') = 'all' OR COALESCE(s.week_type,'all') = $3)
+            ORDER BY s.pair_number ASC
             """,
-            group, weekday, parity
+            group,   # $1
+            weekday, # Пн=1..Вс=7  ($2)
+            parity   # 'odd' / 'even'           ($3)
         )
+        
 
     result = []
     for r in rows:
@@ -127,7 +204,7 @@ async def get_schedule(
     return result
 
 @app.get("/api/groups")
-async def get_groups():
+async def get_groups(current: CurrentUser = Depends(get_current_user)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT DISTINCT group_name FROM weekday_schedule ORDER BY 1;")

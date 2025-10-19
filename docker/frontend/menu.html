@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Меню — КЭМС</title>
+    <style>
+        :root{
+            --bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;
+            --accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff;
+        }
+        *{box-sizing:border-box}
+        body{
+            margin:0;
+            background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);
+            color:var(--fg);
+            font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+        }
+
+        /* Липкая верхняя полоска без кнопок */
+        .topbar{
+            position:sticky; top:0; z-index:10;
+            display:flex; align-items:center; justify-content:center;
+            padding:.6rem 1rem .4rem;
+            background:linear-gradient(180deg,#515376FF,#6d6d8a);
+            border-bottom:1px solid var(--grid);
+            backdrop-filter:blur(6px) saturate(120%);
+            min-height:44px;
+        }
+
+        /* Контейнер меню */
+        .menu-container { width: 430px; margin: 90px auto; padding: 24px 12px 28px; border-radius: 32px; box-shadow: 0 8px 32px #0002; background: none; text-align: center; overflow:hidden; }
+        .menu-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .menu-title { font-size: 40px; color: #fff; font-style: italic; }
+        .menu-date  { font-size: 22px; color: #fff; font-style: italic; }
+        .menu-grid  { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 16px; margin: 20px 0 0 0; width:100%; }
+
+        /* === КНОПКИ: стиль как у index.html (.btn), но крупнее === */
+        .menu-btn{white-space:normal;word-break:break-word;
+            display:flex; flex-direction:column; justify-content:flex-start; align-items:flex-start; position:relative;
+            width:100%; max-width:100%; min-height:100px; padding:16px 20px 14px 20px; cursor:pointer;
+            border-radius:12px; color:#fff; font-weight:900; letter-spacing:.4px; font-style:normal; font-size:20px;
+            background:#ffffff22; border:1px solid #ffffff55; box-sizing:border-box;
+            transition:transform .06s ease, background-color .15s ease, border-color .15s ease;
+            text-align:left; overflow:hidden;
+        }
+        .menu-btn:active{ transform:translateY(1px); }
+
+
+        /* Шахматный порядок: чётные — тёмные */
+        .menu-grid .menu-btn:nth-child(even){ background:#ffffff12; border-color:#ffffff33; }
+
+        /* Фокус/hover для обеих тональностей */
+        .menu-btn:hover{ border-color:#ffffff66; }
+        .menu-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+        /* Мобильное пропорциональное масштабирование меню */
+        .scale-outer { /* на десктопе не влияет */ }
+        @media (max-width: 768px) {
+            .menu-btn{font-size:18px !important; min-height:90px;}
+            .menu-btn:nth-child(1), .menu-btn:nth-child(5){font-size:16px !important;}
+            .menu-btn{font-size:18px !important; min-height:90px;}
+            .scale-outer{
+                --base-width: 430;
+                --scale: clamp(0.5, (100vw - 40px)/var(--base-width), 1);
+                display:flex; justify-content:center;
+                margin-top:60px; padding:0 20px; box-sizing:border-box;
+            }
+            .menu-container{ width: calc(var(--base-width)*1px); margin:0; transform: scale(var(--scale)); transform-origin: top center; }
+        }
+    </style>
+</head>
+<body>
+<div class="topbar"></div>
+
+<div class="scale-outer">
+    <div class="menu-container">
+        <div class="menu-header">
+            <span class="menu-title">Колледж</span>
+            <span class="menu-date">09.10.2025</span>
+        </div>
+        <div style="display:flex; justify-content:flex-end; margin: 8px 0 0;">
+          <button class="menu-btn" style="max-width:160px; min-height:44px;" onclick="logout()">
+            Выйти
+          </button>
+        </div>
+        <div class="menu-grid">
+            <button class="menu-btn" onclick="goSchedule()">
+              <span>Расписание</span>
+            </button>
+            <button class="menu-btn">
+                Оценки
+            </button>
+            <button class="menu-btn">
+                Новости
+            </button>
+            <button class="menu-btn">
+                План Колледжа
+            </button>
+            <button class="menu-btn">
+                Дисциплины
+            </button>
+            <button class="menu-btn">
+                Учебный центр
+            </button>
+        </div>
+    </div>
+</div><script>
+  // Если нет токена — уводим на логин
+  (function(){
+    const token = localStorage.getItem('token');
+    if (!token) {
+      window.location.href = 'index.html';
+      return;
+    }
+    // Можешь здесь же показать имя/роль, если хочешь:
+    // const username = localStorage.getItem('username') || '';
+    // const role = localStorage.getItem('role') || '';
+    // document.querySelector('.menu-title').textContent = `Колледж — ${username} (${role})`;
+  })();
+
+  // Синхронизация даты с датой на компьютере пользователя
+  (function(){
+      const el = document.querySelector('.menu-date');
+      if(!el) return;
+      const d = new Date();
+      const pad = n => String(n).padStart(2,'0');
+      el.textContent = `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()}`;
+  })();
+
+  function logout(){
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    localStorage.removeItem('username');
+    window.location.href = 'index.html';
+  }
+
+  function goSchedule(){
+    const role = localStorage.getItem('role');
+    if (role === 'teacher') {
+      window.location.href = 'teacher.html';
+    } else if (role === 'admin') {
+      window.location.href = 'admin.html';
+    } else {
+      // по умолчанию студент
+      window.location.href = 'day.html';
+    }
+  }
+</script>
+
+</body>
+</html>

@@ -107,6 +107,15 @@
   const prevBtn=document.getElementById('prevWeek');
   const nextBtn=document.getElementById('nextWeek');
 
+  // === Авторизация на странице ===
+  (function(){
+    const token = localStorage.getItem('token');
+    const role  = localStorage.getItem('role');
+    if (!token) { window.location.href = 'index.html'; return; }
+    if (role !== 'student') { window.location.href = 'menu.html'; return; }
+    window.__AUTH_TOKEN__ = token;
+  })();
+
   /* ==== состояние ==== */
   let selectedDay=new Date();
   let weekStart=mondayOf(selectedDay);
@@ -115,7 +124,18 @@
   /* ==== API ==== */
   async function fetchGroupsToDatalist(){
     try{
-      const r=await fetch('/api/groups',{cache:'no-store'});
+      const r=await fetch('/api/groups',{
+        cache:'no-store',
+        headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
+      });
+      if (r.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('role');
+        localStorage.removeItem('username');
+        window.location.href = 'index.html';
+        return;
+      }
+      
       if(!r.ok) return;
       const data=await r.json();
       const arr=Array.isArray(data)?data:(data.groups||[]);
@@ -124,7 +144,18 @@
   }
   async function fetchDay(group,date){
     if(!group) return [];
-    const r=await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`,{cache:'no-store'});
+    const r=await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`,{
+      cache:'no-store',
+      headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
+    });
+    if (r.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+      localStorage.removeItem('username');
+      window.location.href = 'index.html';
+      return [];
+    }
+    
     if(!r.ok) return [];
     return await r.json();
   }

@@ -8,5 +8,9 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY day.html  ./day.html
 COPY week.html ./week.html
 COPY index.html ./index.html
+COPY menu.html  ./menu.html
+COPY teacher.html ./teacher.html
+COPY admin.html   ./admin.html
+
 
 EXPOSE 80

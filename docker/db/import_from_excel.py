@@ -141,7 +141,6 @@ def try_load_structured(xl: pd.ExcelFile) -> Optional[List[Dict[str, Any]]]:
             "time_start": t1.strftime("%H:%M"),
             "time_end":   t2.strftime("%H:%M"),
             "subject": subject,
-            "session_type": "",
             "room": room,
             "teacher": teacher,
             "group_name": group,
@@ -226,7 +225,6 @@ def parse_legacy(xl: pd.ExcelFile) -> List[Dict[str, Any]]:
                         "time_start": t1.strftime("%H:%M"),
                         "time_end":   t2.strftime("%H:%M"),
                         "subject": "",          # в legacy надёжно не извлекаем
-                        "session_type": "",
                         "room": str(room),
                         "teacher": teacher if teacher else "",
                         "group_name": g,
@@ -249,7 +247,6 @@ CREATE TABLE IF NOT EXISTS weekday_schedule (
   time_start TIME NOT NULL,
   time_end   TIME NOT NULL,
   subject    TEXT,
-  session_type VARCHAR(16),
   room       VARCHAR(32),
   teacher    TEXT,
   group_name VARCHAR(32) NOT NULL,
@@ -375,7 +372,7 @@ def main() -> None:
         conn.commit()
 
         cols = ["weekday","pair_number","time_start","time_end",
-                "subject","session_type","room","teacher","group_name","week_type"]
+                "subject","room","teacher","group_name","week_type"]
 
         # Готовим значения
         values = [[row.get(c) for c in cols] for row in rows]
