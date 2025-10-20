@@ -8,6 +8,24 @@ from jwt import InvalidTokenError
 from fastapi import FastAPI, HTTPException, Query, Response, Depends, Header
 from pydantic import BaseModel
 
+import httpx
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_IDS = [x.strip() for x in os.getenv("TELEGRAM_CHAT_IDS","").split(",") if x.strip()]
+
+async def tg_send(text: str):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_IDS:
+        return  # молча выходим, если не настроено
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    async with httpx.AsyncClient(timeout=10) as client:
+        for chat_id in TELEGRAM_CHAT_IDS:
+            try:
+                await client.post(url, json={**payload, "chat_id": chat_id})
+            except Exception as e:
+                print(f"[tg] send failed for {chat_id}: {e}")
+
+
 
 APP_NAME = "schedule-api"
 DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql://user:pass@host:5432/db
@@ -71,15 +89,32 @@ CREATE TABLE IF NOT EXISTS weekly_edits (
 CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
   ON weekly_edits (group_name, day_of_week, week_type);
 
-ALTER TABLE IF NOT EXISTS weekday_schedule
-  ADD COLUMN IF NOT EXISTS normalized_group_name TEXT
-  GENERATED ALWAYS AS (
-    regexp_replace(
-      lower(translate(group_name,
-        'ABCEHKMOPTXYabcehkmoptxy',
-        'АВСЕНКМОРТХУавсенкмортху')),
-      '[^0-9a-zа-яё]+','','g')
-  ) STORED;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_name = 'weekday_schedule'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'weekday_schedule'
+        AND column_name = 'normalized_group_name'
+    ) THEN
+      EXECUTE $sql$
+        ALTER TABLE weekday_schedule
+          ADD COLUMN normalized_group_name TEXT
+          GENERATED ALWAYS AS (
+            regexp_replace(
+              lower(translate(group_name,
+                'ABCEHKMOPTXYabcehkmoptxy',
+                'АВСЕНКМОРТХУавсенкмортху')),
+              '[^0-9a-zа-яё]+','','g')
+          ) STORED
+      $sql$;
+    END IF;
+  END IF;
+END$$;
+
 
 CREATE INDEX IF NOT EXISTS idx_ws_norm_group_weekday_type
   ON weekday_schedule (normalized_group_name, weekday, week_type);
@@ -575,6 +610,18 @@ async def upsert_once_edit(body: OnceEditIn, current: CurrentUser = Depends(requ
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             """, body.group, edit_date, body.pair,
                  body.subject, body.teacher, body.room, body.time_start, body.time_end, body.deleted)
+    # ... внутри upsert_once_edit, прямо перед return:
+    msg = (
+        f"🛠 <b>Разовая правка расписания</b>\n"
+        f"Группа: <b>{body.group}</b>\n"
+        f"Дата: <b>{body.date}</b>, пара: <b>{body.pair}</b>\n"
+        f"Предмет: {body.subject or '—'}\n"
+        f"Преподаватель: {body.teacher or '—'}\n"
+        f"Аудитория: {body.room or '—'}\n"
+        f"Время: {(body.time_start or '—')}–{(body.time_end or '—')}\n"
+        f"Удалено: {'да' if body.deleted else 'нет'}"
+    )
+    await tg_send(msg)
     return {"ok": True}
 
 @app.delete("/api/edits/once")
@@ -590,6 +637,9 @@ async def delete_once_for_day(
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM once_edits WHERE group_name=$1 AND edit_date=$2", group, edit_date)
+    await tg_send(
+        f"🗑 <b>Удалены разовые правки</b>\nГруппа: <b>{group}</b>\nДата: <b>{date}</b>"
+    )
     return {"ok": True}
 
 @app.post("/api/edits/weekly")
@@ -612,4 +662,16 @@ async def upsert_weekly_edit(body: WeeklyEditIn, current: CurrentUser = Depends(
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             """, body.group, body.day_of_week, body.pair, scope,
                  body.subject, body.teacher, body.room, body.time_start, body.time_end, body.deleted)
+    msg = (
+        f"🛠 <b>Недельная правка расписания</b>\n"
+        f"Группа: <b>{body.group}</b>\n"
+        f"День недели: <b>{body.day_of_week}</b> (1=Пн..7=Вс)\n"
+        f"Пара: <b>{body.pair}</b>, чётность: <b>{(body.scope or 'all')}</b>\n"
+        f"Предмет: {body.subject or '—'}\n"
+        f"Преподаватель: {body.teacher or '—'}\n"
+        f"Аудитория: {body.room or '—'}\n"
+        f"Время: {(body.time_start or '—')}–{(body.time_end or '—')}\n"
+        f"Удалено: {'да' if body.deleted else 'нет'}"
+    )
+    await tg_send(msg)
     return {"ok": True}

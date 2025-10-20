@@ -9,9 +9,17 @@ spec:
     spec:
       containers:
       - name: app
-        image: gaarge/api:5.2
+        image: gaarge/api:5.7
         ports: [ { containerPort: 8000 } ]
         env:
+          # ... что уже есть ...
+          - name: TELEGRAM_BOT_TOKEN
+            valueFrom:
+              secretKeyRef: { name: schedule-api-secrets, key: telegram-bot-token }
+          - name: TELEGRAM_CHAT_IDS
+            valueFrom:
+              secretKeyRef: { name: schedule-api-secrets, key: telegram-chat-ids }
+
           - name: RUN_STARTUP_MIGRATIONS
             value: "1"
           - name: PG_POOL_MIN
