@@ -36,13 +36,86 @@ class ScheduleItem(BaseModel):
     week_type: str
 
 
+RUN_STARTUP_MIGRATIONS = os.getenv("RUN_STARTUP_MIGRATIONS", "1") == "1"
+
+MIGRATIONS_SQL = """
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
+    CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
+  END IF;
+END$$;
+
+CREATE TABLE IF NOT EXISTS once_edits (
+  id BIGSERIAL PRIMARY KEY,
+  group_name TEXT NOT NULL,
+  edit_date DATE NOT NULL,
+  pair_number INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
+  subject TEXT, teacher TEXT, room TEXT,
+  time_start TEXT, time_end TEXT,
+  deleted BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_once_edits_group_date
+  ON once_edits (group_name, edit_date);
+
+CREATE TABLE IF NOT EXISTS weekly_edits (
+  id BIGSERIAL PRIMARY KEY,
+  group_name TEXT NOT NULL,
+  day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 1 AND 7),
+  pair_number INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
+  week_type week_type_enum NOT NULL DEFAULT 'all',
+  subject TEXT, teacher TEXT, room TEXT,
+  time_start TEXT, time_end TEXT,
+  deleted BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
+  ON weekly_edits (group_name, day_of_week, week_type);
+
+ALTER TABLE IF NOT EXISTS weekday_schedule
+  ADD COLUMN IF NOT EXISTS normalized_group_name TEXT
+  GENERATED ALWAYS AS (
+    regexp_replace(
+      lower(translate(group_name,
+        'ABCEHKMOPTXYabcehkmoptxy',
+        'АВСЕНКМОРТХУавсенкмортху')),
+      '[^0-9a-zа-яё]+','','g')
+  ) STORED;
+
+CREATE INDEX IF NOT EXISTS idx_ws_norm_group_weekday_type
+  ON weekday_schedule (normalized_group_name, weekday, week_type);
+
+CREATE INDEX IF NOT EXISTS idx_ws_teacher_day_type
+  ON weekday_schedule (weekday, week_type, (lower(trim(teacher))));
+
+CREATE INDEX IF NOT EXISTS idx_once_group_date_pair
+  ON once_edits (group_name, edit_date, pair_number);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_group_day_type_pair
+  ON weekly_edits (group_name, day_of_week, week_type, pair_number);
+"""
+
+@app.on_event("startup")
+async def _apply_startup_migrations():
+    if not RUN_STARTUP_MIGRATIONS:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(MIGRATIONS_SQL)
+
+
+
 _pool: Optional[asyncpg.Pool] = None
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+        _pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=int(os.getenv("PG_POOL_MIN","5")),
+            max_size=int(os.getenv("PG_POOL_MAX","50"))
+        )
     return _pool
+
 
 def make_token(payload: dict) -> str:
     now = datetime.utcnow()

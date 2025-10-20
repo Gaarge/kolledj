@@ -9,9 +9,15 @@ spec:
     spec:
       containers:
       - name: app
-        image: gaarge/api:5.1
+        image: gaarge/api:5.2
         ports: [ { containerPort: 8000 } ]
         env:
+          - name: RUN_STARTUP_MIGRATIONS
+            value: "1"
+          - name: PG_POOL_MIN
+            value: "5"
+          - name: PG_POOL_MAX
+            value: "50"
           - name: ODD_WEEK_ANCHOR
             value: "2025-09-01"
           - name: SECRET_KEY
