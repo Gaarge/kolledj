@@ -74,6 +74,83 @@
         .grid label{font-size:.85rem;opacity:.9}
         .grid input{width:100%;appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.5rem;color:#fff;padding:.4rem .55rem;outline:none}
         .modal .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem}
+        /* === адаптив под телефон === */
+        @media (max-width: 767px){
+            body {
+                font-size: 15px;
+            }
+
+            .topbar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: .4rem;
+            }
+
+            .grp {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .grp input[type="text"] {
+                min-width: 0;
+                flex: 1;
+            }
+
+            .wrap {
+                padding: .5rem;
+            }
+
+            .weeknav {
+                flex-direction: column;
+                gap: .4rem;
+            }
+
+            .weekstrip {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                padding: .35rem .5rem .75rem;
+            }
+
+            .d {
+                width: 36px;
+                height: 36px;
+            }
+
+            .list {
+                padding: .5rem;
+                gap: .5rem;
+            }
+
+            .card {
+                padding: .7rem .8rem;
+                border-radius: 12px;
+            }
+
+            .modal {
+                width: 96vw;
+                max-width: none;
+                padding: .8rem;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .grid input {
+                font-size: 15px;
+            }
+
+            .editbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+
     </style>
 </head>
 <body>
