@@ -7,12 +7,16 @@
   <style>
     :root{--bg:#6d6d8a;--fg:#fff;--card:#3ACB9B;--card2:#0abf83;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
     *{box-sizing:border-box}
-    body{margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
-      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+    body{
+      margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
+      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif
+    }
 
-    .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+    .topbar{
+      position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
       padding:.6rem 1rem;background:linear-gradient(180deg,#515376FF,#6d6d8a);
-      border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)}
+      border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)
+    }
 
     .menuBtn{
       display:inline-flex;align-items:center;gap:.4rem;
@@ -42,8 +46,17 @@
 
     .weekstrip{display:flex;gap:.5rem;align-items:flex-end;justify-content:space-between;padding:.35rem 1rem .75rem;border-bottom:1px solid var(--grid)}
     .dw{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:38px}
-    .d{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:transparent;border:1px solid #ffffff33;color:var(--fg);font-weight:700}
-    .d.today{border-color:var(--accent)} .d.sel{background:#ffffff22;border-color:#ffffff55}
+    .d{
+      width:32px;height:32px;border-radius:10px;display:grid;place-items:center;
+      background:transparent;border:1px solid #ffffff33;color:var(--fg);font-weight:700
+    }
+    /* сегодня: белая обводка */
+    .d.today{border-color:#fff}
+    /* выбранный день: зелёная заливка #13cf34 */
+    .d.sel{background:#59DD70;border-color:#59DD70;color:#fff}
+    /* если выбранный день совпадает с сегодняшним — обводка остаётся белой */
+    .d.sel.today{border-color:#fff}
+
     .dots{display:flex;gap:3px;flex-wrap:wrap;justify-content:center;min-height:6px}
     .dot{width:6px;height:6px;border-radius:50%;background:#ffd24d}
 
@@ -64,9 +77,15 @@
     .room{font-weight:700}
     .muted{opacity:.65}
 
+    /* Только для телефона */
     @media (max-width:640px){
       .topbar{flex-direction:column;align-items:stretch}
       .grp{width:100%}
+      .menuBtn{margin-left:-2px}
+      .tabs{margin-left:-2px}
+      .grp{margin-right:-2px}
+      .tab{padding:calc(.3rem - 1px) calc(.6rem - 1px)}
+      input[type="text"]{width:100%;min-width:0}
     }
   </style>
 </head>

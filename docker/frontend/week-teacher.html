@@ -5,67 +5,105 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Расписание по неделе — преподаватель</title>
   <style>
-    :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
+    :root{--bg:#6d6d8a;--fg:#fff;--card:#3ACB9B;--card2:#0abf83;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
     *{box-sizing:border-box}
-    body{margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
-      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+    html,body{height:100%}
+    body{
+      margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
+      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif
+    }
 
-    .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+    /* Topbar — идентичен day-teacher */
+    .topbar{
+      position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
       padding:.6rem 1rem;background:linear-gradient(180deg,#515376FF,#6d6d8a);
-      border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)}
+      border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)
+    }
+    .menuBtn{
+      display:inline-flex;align-items:center;gap:.4rem;
+      padding:.38rem .7rem;border-radius:.6rem;text-decoration:none;color:#fff;font-weight:800;
+      background:#ffffff18;border:1px solid #ffffff33;white-space:nowrap
+    }
+    .menuBtn:hover{background:#ffffff25}
     .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem}
-    .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85}
+    .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85;white-space:nowrap}
     .tab.sel{background:#ffffff22;opacity:1}
-    .grow{flex:1}
-    .grp{display:inline-flex;gap:.4rem;align-items:center}
-    .grp label{font-weight:700;opacity:.85}
+    .grow{flex:1;min-width:.5rem}
+    .grp{display:inline-flex;gap:.4rem;align-items:center;min-width:0}
     input[type="text"]{
       appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
-      padding:.35rem .6rem;min-width:12rem;outline:none;
+      padding:.35rem .6rem;min-width:8rem;outline:none;flex:1;min-width:0
     }
     input[type="text"]::placeholder{color:#d0dbff88}
 
     .wrap{padding:1rem;max-width:1100px;margin:0 auto}
 
-    .weeknav{display:flex;align-items:center;justify-content:space-between;padding:0 1rem .5rem}
+    /* Навигация недели */
+    .weeknav{display:flex;align-items:center;gap:.5rem;justify-content:space-between;padding:0 1rem .5rem;flex-wrap:wrap}
     .navbtn{background:transparent;border:none;color:var(--fg);font-size:1.25rem;cursor:pointer;padding:.35rem .5rem;border-radius:.5rem;line-height:1}
     .navbtn[disabled]{opacity:.4;cursor:not-allowed}
-    .where{opacity:.9;font-weight:800}
+    .where{opacity:.9;font-weight:800;min-width:0;flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+    /* Сетка дней */
     .grid{display:grid;gap:1rem}
     @media (max-width:640px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media (min-width:641px) and (max-width:1024px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media (min-width:1025px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 
-    .day{background:var(--card);border:1px solid var(--grid);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+    .day{background:var(--card);border:1px solid var(--grid);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
     .day:nth-child(even){background:var(--card2)}
-    .dayHead{padding:.75rem 1rem;border-bottom:1px solid var(--grid);font-weight:800}
+    .dayHead{padding:.75rem 1rem;border-bottom:1px solid var(--grid);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
     .list{padding:.5rem 1rem 1rem;display:flex;flex-direction:column;gap:.6rem}
 
-    /* карточка пары — тот же макет, но компактнее */
-    .card{border:1px solid var(--grid);border-radius:12px;padding:.6rem .75rem;background:transparent;display:flex;flex-direction:column;gap:.35rem}
-    .line1{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem}
-    .subj{font-weight:800;font-size:1.05rem;line-height:1.2}
-    .meta{display:flex;align-items:center;justify-content:space-between;gap:.75rem;font-weight:700;opacity:.9}
-    .pairNum,.time{font-size:.95rem}
+    .card{
+      border:1px solid var(--grid);border-radius:12px;padding:.6rem .75rem;background:transparent;display:flex;flex-direction:column;gap:.45rem;min-width:0
+    }
+    .line1{display:flex;align-items:flex-start;gap:.75rem;min-width:0}
+    .subj{
+      font-weight:800;font-size:1.05rem;line-height:1.25;flex:1;min-width:0;
+      overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;word-break:break-word
+    }
+    .time{margin-left:auto;flex-shrink:0;white-space:nowrap;font-size:.95rem;opacity:.9;text-align:right}
+    .meta{display:flex;align-items:center;justify-content:space-between;gap:.75rem;opacity:.9;min-width:0}
+    .pairNum{font-size:.95rem;font-weight:700;white-space:nowrap}
     .divider{height:1px;background:rgba(255,255,255,.08)}
-    .room,.teacher{opacity:.9;font-size:.95rem}
+    .room,.teacher{opacity:.95;font-size:.95rem;overflow-wrap:anywhere}
+    .room{font-weight:700}
     .muted{opacity:.65}
+
+    /* Мобилка */
+    @media (max-width:640px){
+      .wrap{padding:.75rem}
+      .time, .room, .teacher{display:none}
+      .meta{justify-content:flex-start}
+      .subj{-webkit-line-clamp:3}
+      .card{padding:.55rem .6rem}
+
+      .topbar{flex-direction:column;align-items:stretch}
+      .grp{width:100%}
+      .menuBtn{margin-left:-2px}
+      .tabs{margin-left:-2px}
+      .grp{margin-right:-2px}
+      .tab{padding:calc(.3rem - 1px) calc(.6rem - 1px)}
+      input[type="text"]{width:100%;min-width:0}
+    }
   </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="tabs">
-    <a class="tab" href="/day-teacher.html">День</a>
-    <a class="tab sel" href="/week-teacher.html">Неделя</a>
-    <a class="tab" href="/menu.html">Меню</a>
-  </div>
-  <div class="grow"></div>
-  <div class="grp">
-    <label for="teacherInput">Преподаватель</label>
-    <input id="teacherInput" type="text" placeholder="например, ОИ21-09" list="teachersList" />
-    <datalist id="teachersList"></datalist>
+  <div class="menuRow" style="width:100%;display:flex;gap:.75rem;align-items:center;">
+    <a class="menuBtn" href="/menu.html">Меню</a>
+    <!-- ФИКСИРОВАННЫЙ ПОРЯДОК: Неделя → День -->
+    <div class="tabs">
+      <a class="tab sel" href="/week-teacher.html">Неделя</a>
+      <a class="tab" href="/day-teacher.html">День</a>
+    </div>
+    <div class="grow"></div>
+    <div class="grp">
+      <input id="teacherInput" type="text" placeholder="например, Иванов Иван Иваныч" list="teachersList" />
+      <datalist id="teachersList"></datalist>
+    </div>
   </div>
 </div>
 
@@ -85,7 +123,7 @@
   const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   const mondayOf=date=>{const d=new Date(date); const wd=(d.getDay()+6)%7; d.setDate(d.getDate()-wd); d.setHours(0,0,0,0); return d;};
   const fmtMonthRu=d=>["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"][d.getMonth()]+" "+d.getFullYear();
-  const semWeekIndex=date=>{const diff=Math.floor((mondayOf(date)-mondayOf(SEM_START))/(7*24*3600*1000)); return diff+1;};
+  const semWeekIndex=date=>{const diff=Math.floor((mondayOf(date)-mondayOf(SEM_START))/(7*24*3600*1000)); return diff+1;}
 
   const grid=document.getElementById('grid');
   const where=document.getElementById('where');
@@ -94,16 +132,13 @@
   const prevBtn=document.getElementById('prevWeek');
   const nextBtn=document.getElementById('nextWeek');
 
-
-  // === Авторизация на странице ===
   (function(){
     const token = localStorage.getItem('token');
-    if (!token) {
-      window.location.href = 'index.html';
-      return;
-    }
+    const role  = localStorage.getItem('role');
+    if (!token) { window.location.href = 'index.html'; return; }
+    if (role !== 'teacher') { window.location.href = 'menu.html'; return; }
     window.__AUTH_TOKEN__ = token;
-  })();  
+  })();
 
   let weekStart=mondayOf(new Date());
   let currentTeacher = localStorage.getItem('teacher') ||"";
@@ -115,13 +150,8 @@
         headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
       });
       if (r.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('role');
-        localStorage.removeItem('username');
-        window.location.href = 'index.html';
-        return;
+        localStorage.clear(); window.location.href = 'index.html'; return;
       }
-      
       if(!r.ok) return;
       const data=await r.json();
       const arr=Array.isArray(data)?data:(data.teachers || []);
@@ -135,13 +165,8 @@
       headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
     });
     if (r.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('role');
-      localStorage.removeItem('username');
-      window.location.href = 'index.html';
-      return [];
+      localStorage.clear(); window.location.href = 'index.html'; return [];
     }
-    
     if(!r.ok) return [];
     return await r.json();
   }
@@ -159,6 +184,7 @@
   async function render(){
     if(weekStart < mondayOf(SEM_START)) weekStart=mondayOf(SEM_START);
     if(weekStart > mondayOf(SEM_END))   weekStart=mondayOf(SEM_END);
+
     const idx=semWeekIndex(weekStart);
     where.textContent = `${fmtMonthRu(weekStart)} • ${idx} неделя`;
     prevBtn.disabled = idx<=1; nextBtn.disabled = idx>=SEM_WEEKS;
@@ -187,6 +213,7 @@
           const room=getRoom(it)||"—";
           const teacher=getTeacher(it)||"—";
 
+          const roomLower = room.toString().toLowerCase();
           const card=document.createElement('div'); card.className='card';
           card.innerHTML=`
             <div class="line1">
@@ -198,7 +225,7 @@
               <div class="muted"></div>
             </div>
             <div class="divider"></div>
-            <div class="room">${room.toString().toLowerCase()==='zoom'||room.toLowerCase()==='chilla'?'online':'Каб '}${room}</div>
+            <div class="room">${(roomLower==='zoom'||roomLower==='chilla')?'online':'Каб '}${room}</div>
             <div class="teacher">${teacher}</div>
           `;
           list.appendChild(card);
@@ -210,7 +237,11 @@
   (async()=>{
     fetchTeachersToDatalist();
     teacherInput.value = currentTeacher;
-    const applyTeacher = async ()=>{ teacherInput=(teacherInput.value||"").trim(); localStorage.setItem('teacher',currentTeacher); await render(); };
+    const applyTeacher = async ()=>{
+      currentTeacher = (teacherInput.value||"").trim();
+      localStorage.setItem('teacher', currentTeacher);
+      await render();
+    };
     teacherInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyTeacher(); });
     teacherInput.addEventListener('blur', applyTeacher);
 
