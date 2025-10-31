@@ -38,7 +38,7 @@ spec:
           - name: JWT_EXPIRES_DAYS
             value: "7"
           - name: DATABASE_URL
-            value: "postgresql://schedule_user:schedule_pass@pgbouncer:6432/postgres"
+            value: "postgresql://schedule_user:schedule_pass@pgbouncer:6432/schedule_db"
         readinessProbe: { httpGet: { path: /healthz, port: 8000 }, initialDelaySeconds: 5, periodSeconds: 10 }
         livenessProbe: { httpGet: { path: /healthz, port: 8000 }, initialDelaySeconds: 15, periodSeconds: 20 }
 ---

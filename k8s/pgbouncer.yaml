@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      containers:
+      - name: pgbouncer
+        image: pgbouncer/pgbouncer:latest
+        imagePullPolicy: IfNotPresent
+        # ВАЖНО: команду/args НЕ переопределяем — у офиц. образа свой entrypoint, он читает ENV
+        env:
+        - name: DATABASES
+          value: "schedule_db=host=postgres port=5432 dbname=schedule_db user=schedule_user password=schedule_pass pool_size=50"
+        - name: POOL_MODE
+          value: "transaction"
+        - name: AUTH_TYPE
+          value: "any"        # для старта; позже включим md5 + userlist.txt
+        - name: LISTEN_ADDR
+          value: "0.0.0.0"
+        - name: LISTEN_PORT
+          value: "6432"
+        - name: LOG_STATS
+          value: "1"
+        - name: STATS_PERIOD
+          value: "60"
+        - name: DEFAULT_POOL_SIZE
+          value: "50"
+        - name: MAX_CLIENT_CONN
+          value: "2000"
+        - name: IGNORE_STARTUP_PARAMETERS
+          value: "extra_float_digits,search_path,standard_conforming_strings,application_name"
+        ports:
+        - containerPort: 6432
+        readinessProbe:
+          tcpSocket:
+            port: 6432
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 6432
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+spec:
+  selector:
+    app: pgbouncer
+  ports:
+  - name: pgbouncer
+    port: 6432
+    targetPort: 6432

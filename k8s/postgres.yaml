@@ -203,7 +203,7 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: postgres
+  name: schedule-db
 spec:
   replicas: 1
   selector:
