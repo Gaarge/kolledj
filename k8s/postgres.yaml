@@ -1,26 +1,82 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
-metadata: { name: pgdata }
+metadata:
+  name: pgdata
 spec:
-  accessModes: [ "ReadWriteOnce" ]
-  resources: { requests: { storage: 1Gi } }
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
 ---
 apiVersion: v1
 kind: ConfigMap
-metadata: { name: pg-init-sql }
+metadata:
+  name: pg-init-sql
 data:
-  02_add_normalized_column_and_indexes.sql: |
-    -- СОДЕРЖИМОЕ из docker/db/init/02_add_normalized_column_and_indexes.sql
+  00_base_schema.sql: |
+    -- Тип недели единожды
     DO $$
     BEGIN
-      IF EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_name = 'weekday_schedule'
-      ) THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
+        CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
+      END IF;
+    END$$;
+
+    -- Пользователи приложения
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('student','teacher','admin'))
+    );
+
+    -- Базовое расписание (нормализованное)
+    CREATE TABLE IF NOT EXISTS weekday_schedule (
+      id SERIAL PRIMARY KEY,
+      group_name TEXT NOT NULL,
+      weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),   -- ISO: Пн=1..Вс=7
+      pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
+      time_start TIME NOT NULL,
+      time_end   TIME NOT NULL,
+      subject    TEXT NOT NULL,
+      teacher    TEXT NOT NULL,
+      room       TEXT NOT NULL,
+      week_type  week_type_enum NOT NULL DEFAULT 'all'
+    );
+
+    -- Инварианты
+    ALTER TABLE weekday_schedule
+      ADD CONSTRAINT IF NOT EXISTS chk_time_range
+      CHECK (time_end > time_start);
+
+    -- Базовая уникальность слота расписания
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_ws_group_day_pair_type
+      ON weekday_schedule (group_name, weekday, pair_number, week_type);
+
+    -- Тестовые учётки (безопасно при повторном запуске)
+    INSERT INTO users (username, password_hash, role)
+    VALUES ('student1', crypt('studentpass', gen_salt('bf')), 'student')
+    ON CONFLICT (username) DO NOTHING;
+
+    INSERT INTO users (username, password_hash, role)
+    VALUES ('teacher1', crypt('teacherpass', gen_salt('bf')), 'teacher')
+    ON CONFLICT (username) DO NOTHING;
+
+    INSERT INTO users (username, password_hash, role)
+    VALUES ('admin1', crypt('adminpass', gen_salt('bf')), 'admin')
+    ON CONFLICT (username) DO NOTHING;
+
+  02_normalized_and_indexes.sql: |
+    -- Вычисляемые ключи и индексы под горячие запросы
+
+    -- 1) Вычисляемые ключи в weekday_schedule
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'weekday_schedule') THEN
+        -- Нормализованное имя группы (транслит кириллицы в похожие латинские и очистка)
         IF NOT EXISTS (
           SELECT 1 FROM information_schema.columns
-          WHERE table_name = 'weekday_schedule'
-            AND column_name = 'normalized_group_name'
+          WHERE table_name = 'weekday_schedule' AND column_name = 'normalized_group_name'
         ) THEN
           EXECUTE $sql$
             ALTER TABLE weekday_schedule
@@ -34,25 +90,35 @@ data:
               ) STORED
           $sql$;
         END IF;
+
+        -- Ключ преподавателя без функций в индексах
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'weekday_schedule' AND column_name = 'teacher_key'
+        ) THEN
+          EXECUTE 'ALTER TABLE weekday_schedule
+                   ADD COLUMN teacher_key TEXT
+                   GENERATED ALWAYS AS (lower(trim(teacher))) STORED';
+        END IF;
       END IF;
     END$$;
-      
-    CREATE INDEX IF NOT EXISTS idx_ws_norm_group_weekday_type
-      ON weekday_schedule (normalized_group_name, weekday, week_type);
-    CREATE INDEX IF NOT EXISTS idx_ws_teacher_day_type
-      ON weekday_schedule (weekday, week_type, (lower(trim(teacher))));
-    CREATE INDEX IF NOT EXISTS idx_once_group_date_pair
-      ON once_edits (group_name, edit_date, pair_number);
-    CREATE INDEX IF NOT EXISTS idx_weekly_group_day_type_pair
-      ON weekly_edits (group_name, day_of_week, week_type, pair_number);
-  03_edits_schema.sql: |
-    -- СОДЕРЖИМОЕ из docker/db/init/03_edits_schema.sql
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
-        CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
-      END IF;
-    END$$;
+
+    -- 2) Индексы по базовой таблице (covering indexes)
+    DROP INDEX IF EXISTS idx_ws_group_weekday;
+
+    -- Поиск по группе/дню/типу/паре
+    CREATE INDEX IF NOT EXISTS idx_ws_group_day_type_pair
+      ON weekday_schedule (normalized_group_name, weekday, week_type, pair_number)
+      INCLUDE (subject, room, time_start, time_end, teacher);
+
+    -- Поиск по преподавателю/дню/типу/паре
+    CREATE INDEX IF NOT EXISTS idx_ws_teacher_day_type_pair
+      ON weekday_schedule (teacher_key, weekday, week_type, pair_number)
+      INCLUDE (subject, room, time_start, time_end, group_name, room);
+
+    -- 3) Таблицы правок и индексы
+
+    -- Разовые правки (на конкретную дату)
     CREATE TABLE IF NOT EXISTS once_edits (
       id BIGSERIAL PRIMARY KEY,
       group_name TEXT NOT NULL,
@@ -62,8 +128,26 @@ data:
       time_start TEXT, time_end TEXT,
       deleted BOOLEAN NOT NULL DEFAULT FALSE
     );
+
+    -- Уникальность слота разовой правки (если нужны «дубли», уберите этот индекс)
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_once_group_date_pair
+      ON once_edits (group_name, edit_date, pair_number);
+
     CREATE INDEX IF NOT EXISTS idx_once_edits_group_date
       ON once_edits (group_name, edit_date);
+
+    -- Часто читаем только активные правки: partial + cover
+    CREATE INDEX IF NOT EXISTS idx_once_group_date_pair_active
+      ON once_edits (group_name, edit_date, pair_number)
+      WHERE deleted = false
+      INCLUDE (subject, room, time_start, time_end, teacher);
+
+    CREATE INDEX IF NOT EXISTS idx_once_teacher_date_pair_active
+      ON once_edits (teacher, edit_date, pair_number)
+      WHERE deleted = false
+      INCLUDE (subject, room, time_start, time_end, group_name);
+
+    -- Недельные правки (регулярные)
     CREATE TABLE IF NOT EXISTS weekly_edits (
       id BIGSERIAL PRIMARY KEY,
       group_name TEXT NOT NULL,
@@ -74,126 +158,141 @@ data:
       time_start TEXT, time_end TEXT,
       deleted BOOLEAN NOT NULL DEFAULT FALSE
     );
+
+    -- Уникальность слота недельной правки
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_group_day_pair_type
+      ON weekly_edits (group_name, day_of_week, pair_number, week_type);
+
+    -- Базовый индекс (совместимость с текущим кодом)
     CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
       ON weekly_edits (group_name, day_of_week, week_type);
-  00_create_schema.sql: |
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
-            CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
-          END IF;
-        END$$;
-        CREATE TABLE IF NOT EXISTS once_edits (
-          id           BIGSERIAL PRIMARY KEY,
-          group_name   TEXT NOT NULL,
-          edit_date    DATE NOT NULL,
-          pair_number  INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
-          subject      TEXT,
-          teacher      TEXT,
-          room         TEXT,
-          time_start   TEXT,
-          time_end     TEXT,
-          deleted      BOOLEAN NOT NULL DEFAULT FALSE
-        );
-        CREATE INDEX IF NOT EXISTS idx_once_edits_group_date
-          ON once_edits (group_name, edit_date);
-        
-        CREATE TABLE IF NOT EXISTS weekly_edits (
-          id           BIGSERIAL PRIMARY KEY,
-          group_name   TEXT NOT NULL,
-          day_of_week  INTEGER NOT NULL CHECK (day_of_week BETWEEN 1 AND 7), -- ISO: Пн=1..Вс=7
-          pair_number  INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
-          week_type    week_type_enum NOT NULL DEFAULT 'all',
-          subject      TEXT,
-          teacher      TEXT,
-          room         TEXT,
-          time_start   TEXT,
-          time_end     TEXT,
-          deleted      BOOLEAN NOT NULL DEFAULT FALSE
-        );
-        CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
-          ON weekly_edits (group_name, day_of_week, week_type);
-        -- ВАЖНО: этот файл рассчитан на пустую БД (первый старт тома)
-        -- Если БД уже есть, применяй вручную через psql.
-        
-        -- Расширение для bcrypt-хеширования
-        CREATE EXTENSION IF NOT EXISTS pgcrypto;
-        
-        -- Пользователи приложения
-        CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          username TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('student','teacher','admin'))
-        );
-        
-        -- Нормализованное расписание (то, что реально использует API)
-        CREATE TABLE IF NOT EXISTS weekday_schedule (
-          id SERIAL PRIMARY KEY,
-          group_name TEXT NOT NULL,               -- имя группы, строкой как в Excel
-          weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7), -- Пн=1..Вс=7
-          pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
-          time_start TIME NOT NULL,
-          time_end   TIME NOT NULL,
-          subject    TEXT NOT NULL,
-          teacher    TEXT NOT NULL,
-          room       TEXT NOT NULL,
-          week_type  TEXT NOT NULL CHECK (week_type IN ('all','even','odd'))
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_ws_group_weekday
-          ON weekday_schedule (group_name, weekday);
-        -- Тестовые учётки (хешируются через pgcrypto/crypt)
-        INSERT INTO users (username, password_hash, role) VALUES
-        ('student1', crypt('studentpass', gen_salt('bf')), 'student')
-        ON CONFLICT (username) DO NOTHING;
-        
-        INSERT INTO users (username, password_hash, role) VALUES
-        ('teacher1', crypt('teacherpass', gen_salt('bf')), 'teacher')
-        ON CONFLICT (username) DO NOTHING;
-        
-        INSERT INTO users (username, password_hash, role) VALUES
-        ('admin1', crypt('adminpass', gen_salt('bf')), 'admin')
-        ON CONFLICT (username) DO NOTHING;
-        
+
+    -- Активные недельные правки: partial + cover (по группе)
+    CREATE INDEX IF NOT EXISTS idx_weekly_group_day_type_pair_active
+      ON weekly_edits (group_name, day_of_week, week_type, pair_number)
+      WHERE deleted = false
+      INCLUDE (subject, room, time_start, time_end, teacher);
+
+    -- Активные недельные правки: partial + cover (по преподавателю)
+    CREATE INDEX IF NOT EXISTS idx_weekly_teacher_day_type_pair_active
+      ON weekly_edits (teacher, day_of_week, week_type, pair_number)
+      WHERE deleted = false
+      INCLUDE (subject, room, time_start, time_end, group_name);
+
+  03_permissions_extensions.sql: |
+    -- Расширение для bcrypt-хеширования паролей
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+    -- На проде можно добавить строгие права (пример; адаптируй под свои роли)
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'schedule_ro') THEN
+        CREATE ROLE schedule_ro;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'schedule_rw') THEN
+        CREATE ROLE schedule_rw;
+      END IF;
+    END$$;
+
+    GRANT USAGE ON SCHEMA public TO schedule_ro, schedule_rw;
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO schedule_ro;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO schedule_rw;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO schedule_ro;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO schedule_rw;
 ---
 apiVersion: apps/v1
 kind: Deployment
-metadata: { name: postgres }
+metadata:
+  name: postgres
 spec:
-  selector: { matchLabels: { app: postgres } }
   replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
   template:
-    metadata: { labels: { app: postgres } }
+    metadata:
+      labels:
+        app: postgres
     spec:
       terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 999
       containers:
-      - name: db
-        image: gaarge/db:5.6
-        ports: [ { containerPort: 5432 } ]
-        env:
-          - { name: POSTGRES_USER,     value: "schedule_user" }
-          - { name: POSTGRES_PASSWORD, value: "schedule_pass" }
-          - { name: POSTGRES_DB,       value: "schedule_db" }
-          - { name: EXCEL_PATH,        value: "/app/excel/schedule.xlsx" }
-        volumeMounts:
-          - { name: data,     mountPath: /var/lib/postgresql/data }
-          - { name: init-sql, mountPath: /docker-entrypoint-initdb.d }
-        lifecycle:
-          postStart:
+        - name: db
+          image: gaarge/db:5.6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "schedule_user"
+            - name: POSTGRES_PASSWORD
+              value: "schedule_pass"
+            - name: POSTGRES_DB
+              value: "schedule_db"
+            - name: EXCEL_PATH
+              value: "/app/excel/schedule.xlsx"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          readinessProbe:
             exec:
-               command: ["sh","-lc","set -e; echo '[postStart] waiting for Postgres...'; for i in $(seq 1 60); do pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1 && break; sleep 2; done; pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1; echo \"[postStart] checking $EXCEL_PATH\"; [ -f \"$EXCEL_PATH\" ]; export DATABASE_URL=\"postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}\"; echo '[postStart] importing...'; /opt/venv/bin/python /app/import_from_excel.py; echo '[postStart] import finished'"]
-               
-               
+              command: ["sh","-lc","pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["sh","-lc","pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -lc
+                  - |
+                    set -e
+                    echo '[postStart] waiting for Postgres...'
+                    for i in $(seq 1 60); do
+                      pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 && break
+                      sleep 2
+                    done
+                    pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+                    echo "[postStart] checking $EXCEL_PATH"
+                    [ -f "$EXCEL_PATH" ] || { echo "Excel not found: $EXCEL_PATH"; exit 0; }
+                    export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
+                    echo '[postStart] importing from Excel...'
+                    /opt/venv/bin/python /app/import_from_excel.py || true
+                    echo '[postStart] import finished'
       volumes:
         - name: data
-          persistentVolumeClaim: { claimName: pgdata }
+          persistentVolumeClaim:
+            claimName: pgdata
         - name: init-sql
-          configMap: { name: pg-init-sql }
+          configMap:
+            name: pg-init-sql
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: postgres }
+metadata:
+  name: postgres
 spec:
-  selector: { app: postgres }
-  ports: [ { port: 5432, targetPort: 5432 } ]
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

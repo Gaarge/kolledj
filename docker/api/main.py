@@ -147,7 +147,7 @@ async def get_pool() -> asyncpg.Pool:
         _pool = await asyncpg.create_pool(
             DATABASE_URL,
             min_size=int(os.getenv("PG_POOL_MIN","5")),
-            max_size=int(os.getenv("PG_POOL_MAX","50"))
+            max_size=int(os.getenv("PG_POOL_MAX","20"))
         )
     return _pool
 

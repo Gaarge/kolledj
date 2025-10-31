@@ -25,7 +25,7 @@ spec:
           - name: PG_POOL_MIN
             value: "5"
           - name: PG_POOL_MAX
-            value: "50"
+            value: "20"
           - name: ODD_WEEK_ANCHOR
             value: "2025-09-01"
           - name: SECRET_KEY
@@ -38,7 +38,7 @@ spec:
           - name: JWT_EXPIRES_DAYS
             value: "7"
           - name: DATABASE_URL
-            value: "postgresql://schedule_user:schedule_pass@postgres:5432/schedule_db"
+            value: "postgresql://schedule_user:schedule_pass@pgbouncer:6432/postgres"
         readinessProbe: { httpGet: { path: /healthz, port: 8000 }, initialDelaySeconds: 5, periodSeconds: 10 }
         livenessProbe: { httpGet: { path: /healthz, port: 8000 }, initialDelaySeconds: 15, periodSeconds: 20 }
 ---

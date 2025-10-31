@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Расписание на день</title>
     <style>
-        :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
+        :root{--bg:#6d6d8a;--fg:#fff;--card:#3ACB9B;--card2:#0abf83;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
         *{box-sizing:border-box}
         body{margin:0;background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);color:var(--fg);
             font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
 
-        .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+        .topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.5rem;flex-wrap:nowrap;
             padding:.6rem 1rem;background:linear-gradient(180deg,#515376FF,#6d6d8a);
             border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)}
-        .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem}
-        .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85}
+        .tabs{display:inline-flex;gap:.25rem;background:#ffffff12;border:1px solid #ffffff33;border-radius:10px;padding:.15rem;flex-shrink:0}
+        .tab{padding:.3rem .6rem;border-radius:.6rem;color:#fff;text-decoration:none;font-weight:700;opacity:.85;white-space:nowrap}
         .tab.sel{background:#ffffff22;opacity:1}
         .grow{flex:1}
         .grp{display:inline-flex;gap:.4rem;align-items:center}
-        .grp label{font-weight:700;opacity:.85}
+        .grp label{font-weight:700;opacity:.85;white-space:nowrap}
         input[type="text"]{
             appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
             padding:.35rem .6rem;min-width:12rem;outline:none;
@@ -34,10 +34,10 @@
         .where{opacity:.9;font-weight:800}
 
         /* полоса дней недели */
-        .weekstrip{display:flex;gap:.5rem;align-items:flex-end;justify-content:space-between;padding:.35rem 1rem .75rem;border-bottom:1px solid var(--grid)}
+        .weekstrip{display:flex;gap:.5rem;align-items:flex-end;justify-content:space-between;padding:.35rem 1rem .75rem;border-bottom:1px solid #ffffff22}
         .dw{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:38px}
         .d{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:transparent;border:1px solid #ffffff33;color:var(--fg);font-weight:700}
-        .d.today{border-color:var(--accent)} .d.sel{background:#ffffff22;border-color:#ffffff55}
+        .d.today{border-color:var(--accent)} .d.sel{background:#59DD70;border-color:#59DD70}
         .dots{display:flex;gap:3px;flex-wrap:wrap;justify-content:center;min-height:6px}
         .dot{width:6px;height:6px;border-radius:50%;background:#ffd24d}
 
@@ -74,6 +74,81 @@
         .grid label{font-size:.85rem;opacity:.9}
         .grid input{width:100%;appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.5rem;color:#fff;padding:.4rem .55rem;outline:none}
         .modal .actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.75rem}
+
+        /* === адаптив под телефон === */
+        @media (max-width: 767px){
+            body { font-size: 15px; }
+
+            /* topbar — одна строка: Меню + выбор группы */
+            .topbar {
+                flex-direction: row;
+                align-items: center;
+                gap: .5rem;
+                padding: .6rem .6rem;
+            }
+            .grow { display: none; }      /* чтобы не раздвигал */
+
+            .tabs { flex-shrink: 0; }     /* табс строго вокруг «Меню» */
+
+            .grp {
+                width: auto;              /* вместо 100% */
+                min-width: 0;
+                flex: 1;                  /* занимает остаток строки */
+                justify-content: flex-start;
+                gap: .5rem;
+            }
+            .grp input[type="text"] {
+                min-width: 0;
+                flex: 1;                  /* поле растягивается */
+            }
+
+            .wrap { padding: .5rem; }
+
+            /* weeknav — стрелки и текст на одной линии */
+            .weeknav {
+                display: flex;
+                flex-direction: row;      /* было column */
+                align-items: center;
+                justify-content: space-between;
+                gap: .4rem;
+                padding: 0 .5rem .5rem;
+            }
+            .where {
+                flex: 1;
+                text-align: center;       /* центрируем между стрелками */
+                font-weight: 800;
+            }
+            .navbtn { padding: .35rem .55rem; }
+
+            .weekstrip {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                padding: .35rem .5rem .75rem;
+            }
+
+            .d { width: 36px; height: 36px; }
+
+            .list { padding: .5rem; gap: .5rem; }
+
+            .card { padding: .7rem .8rem; border-radius: 12px; }
+
+            .modal { width: 96vw; max-width: none; padding: .8rem; }
+
+            .grid { grid-template-columns: 1fr; }
+
+            .grid input { font-size: 15px; }
+
+            .editbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -175,10 +250,10 @@
     const nextBtn=document.getElementById('nextWeek');
     const addPairBtn=document.getElementById('addPairBtn');
     const resetDayBtn=document.getElementById('resetDayBtn');
-	// JWT из localStorage/sessionStorage (его отдал /api/login)
-	const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-	const authHeaders = () => ({ 'Authorization': `Bearer ${getToken()}` });
-	
+    // JWT из localStorage/sessionStorage (его отдал /api/login)
+    const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+    const authHeaders = () => ({ 'Authorization': `Bearer ${getToken()}` });
+
     // modal refs
     const modal=document.getElementById('modal');
     const f_subject=document.getElementById('f_subject');
@@ -202,51 +277,51 @@
 
     // === Авторизация на странице ===
     (function(){
-      const token = localStorage.getItem('token');
-      const role  = localStorage.getItem('role');
-      if (!token) { window.location.href = 'index.html'; return; }
-      if (role !== 'admin') { window.location.href = 'menu.html'; return; }
-      window.__AUTH_TOKEN__ = token;
+        const token = localStorage.getItem('token');
+        const role  = localStorage.getItem('role');
+        if (!token) { window.location.href = 'index.html'; return; }
+        if (role !== 'admin') { window.location.href = 'menu.html'; return; }
+        window.__AUTH_TOKEN__ = token;
     })();
 
 
     /* ==== API ==== */
     async function fetchGroupsToDatalist(){
         try{
-          const r = await fetch('/api/groups', { cache:'no-store', headers: authHeaders() });
-          
-          if (r.status === 401) {
+            const r = await fetch('/api/groups', { cache:'no-store', headers: authHeaders() });
+
+            if (r.status === 401) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('role');
+                localStorage.removeItem('username');
+                window.location.href = 'index.html';
+                return;
+            }
+
+            if(!r.ok) return;
+            const data=await r.json();
+            const arr=Array.isArray(data)?data:(data.groups||[]);
+            groupsList.innerHTML = arr.map(g=>`<option value="${g}"/>`).join('');
+        }catch{}
+    }
+    async function fetchDay(group,date){
+        if(!group) return [];
+        const r = await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`, {
+            cache:'no-store',
+            headers: authHeaders()
+        });
+
+        if (r.status === 401) {
             localStorage.removeItem('token');
             localStorage.removeItem('role');
             localStorage.removeItem('username');
             window.location.href = 'index.html';
-            return;
-          }
-          
-          if(!r.ok) return;
-          const data=await r.json();
-          const arr=Array.isArray(data)?data:(data.groups||[]);
-          groupsList.innerHTML = arr.map(g=>`<option value="${g}"/>`).join('');
-        }catch{}
-      }
-      async function fetchDay(group,date){
-        if(!group) return [];
-        const r = await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`, {
-          cache:'no-store',
-          headers: authHeaders()
-        });
-        
-        if (r.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('role');
-          localStorage.removeItem('username');
-          window.location.href = 'index.html';
-          return [];
+            return [];
         }
-        
+
         if(!r.ok) return [];
         return await r.json();
-      }
+    }
 
     /* ==== helpers ==== */
     const getSubject = it => {
@@ -300,65 +375,54 @@
         });
     }
 
-	// === Week overview helpers (вставить до renderWeekStrip) ===
-	
-	
-
-	
-	// строим URL батч-эндпоинта
-	function weekOverviewUrl({ group, teacher, mondayISO }) {
-	  const p = new URLSearchParams({ monday: mondayISO });
-	  if (group)   p.set('group', group);
-	  if (teacher) p.set('teacher', teacher);
-	  return `/api/week_overview?` + p.toString();
-	}
-	
-	// сам батч-запрос (возвращает [{date:'YYYY-MM-DD', count:N}, ...])
-	async function fetchWeekOverview({ group, teacher, mondayDateObj }) {
-	  const mondayISO = iso(mondayDateObj);
-	  const url = weekOverviewUrl({ group, teacher, mondayISO });
-	  const r = await fetch(url, { cache: 'no-store', headers: authHeaders() });
-	  if (r.status === 401) {
-	    // твоя стандартная переавторизация
-	    localStorage.removeItem('token'); localStorage.removeItem('role'); localStorage.removeItem('username');
-	    location.href = 'index.html';
-	    return [];
-	  }
-	  if (!r.ok) {
-	    console.warn('week_overview error', r.status);
-	    return [];
-	  }
-	  return r.json();
-	}
-	// === end helpers ===
-	
-    
+    // === Week overview helpers ===
+    function weekOverviewUrl({ group, teacher, mondayISO }) {
+        const p = new URLSearchParams({ monday: mondayISO });
+        if (group)   p.set('group', group);
+        if (teacher) p.set('teacher', teacher);
+        return `/api/week_overview?` + p.toString();
+    }
+    async function fetchWeekOverview({ group, teacher, mondayDateObj }) {
+        const mondayISO = iso(mondayDateObj);
+        const url = weekOverviewUrl({ group, teacher, mondayISO });
+        const r = await fetch(url, { cache: 'no-store', headers: authHeaders() });
+        if (r.status === 401) {
+            localStorage.removeItem('token'); localStorage.removeItem('role'); localStorage.removeItem('username');
+            location.href = 'index.html';
+            return [];
+        }
+        if (!r.ok) {
+            console.warn('week_overview error', r.status);
+            return [];
+        }
+        return r.json();
+    }
+    // === end helpers ===
 
     async function renderWeekStrip(){
-      weekStripEl.innerHTML="";
-      const today=new Date();
-      where.textContent = `${fmtMonthRu(selectedDay)} • ${semWeekIndex(selectedDay)} неделя`;
-      prevBtn.disabled = semWeekIndex(weekStart) <= 1;
-      nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
-    
-      let overview = [];
-      if (currentGroup) {
-        overview = await fetchWeekOverview({ group: currentGroup, teacher: null, mondayDateObj: weekStart });
-      }
-    
-      for(let i=0;i<7;i++){
-        const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
-        const wrap=document.createElement('div'); wrap.className='dw';
-        const btn=document.createElement('button'); btn.className='d'+(sameDay(d,today)?' today':'')+(sameDay(d,selectedDay)?' sel':''); btn.textContent=d.getDate();
-        btn.onclick = async ()=>{ selectedDay=d; await updateDay(); };
-        const dots=document.createElement('div'); dots.className='dots';
-        wrap.appendChild(btn); wrap.appendChild(dots); weekStripEl.appendChild(wrap);
-    
-        const cnt = (overview.find(x => x.date === iso(d))?.count) || 0;
-        for(let j=0;j<cnt;j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>');
-      }
+        weekStripEl.innerHTML="";
+        const today=new Date();
+        where.textContent = `${fmtMonthRu(selectedDay)} • ${semWeekIndex(selectedDay)} неделя`;
+        prevBtn.disabled = semWeekIndex(weekStart) <= 1;
+        nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
+
+        let overview = [];
+        if (currentGroup) {
+            overview = await fetchWeekOverview({ group: currentGroup, teacher: null, mondayDateObj: weekStart });
+        }
+
+        for(let i=0;i<7;i++){
+            const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
+            const wrap=document.createElement('div'); wrap.className='dw';
+            const btn=document.createElement('button'); btn.className='d'+(sameDay(d,today)?' today':'')+(sameDay(d,selectedDay)?' sel':''); btn.textContent=d.getDate();
+            btn.onclick = async ()=>{ selectedDay=d; await updateDay(); };
+            const dots=document.createElement('div'); dots.className='dots';
+            wrap.appendChild(btn); wrap.appendChild(dots); weekStripEl.appendChild(wrap);
+
+            const cnt = (overview.find(x => x.date === iso(d))?.count) || 0;
+            for(let j=0;j<cnt;j++) dots.insertAdjacentHTML('beforeend','<span class="dot"></span>');
+        }
     }
-    
 
     async function updateDay(){
         await renderWeekStrip();
@@ -428,11 +492,11 @@
             deleted: !!patch.__deleted
         };
         const r = await fetch('/api/edits/once', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify(payload)
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify(payload)
         });
-        
+
         if(!r.ok){ alert('Ошибка сохранения (разово)'); }
     }
 
@@ -453,11 +517,11 @@
             scope
         };
         const r = await fetch('/api/edits/weekly', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify(payload)
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify(payload)
         });
-        
+
         if(!r.ok){ alert('Ошибка сохранения (еженедельно)'); }
     }
 
@@ -477,10 +541,10 @@
         if(!currentGroup) return;
         if(confirm('Сбросить все разовые правки для выбранной даты?')){
             fetch(`/api/edits/once?group=${encodeURIComponent(currentGroup)}&date=${iso(selectedDay)}`, {
-              method: 'DELETE',
-              headers: authHeaders()
+                method: 'DELETE',
+                headers: authHeaders()
             }).then(()=>updateDay());
-            
+
         }
     });
 

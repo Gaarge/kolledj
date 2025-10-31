@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Вход — КЭМС</title>
   <style>
-    /* палитра и типографика как в week/day */
     :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -16,7 +15,6 @@
       font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif
     }
 
-    /* верхняя мини-шапка */
     .topbar{
       position:fixed; inset:0 auto auto 0; height:52px; width:100%;
       display:flex; align-items:center; gap:.5rem; padding:.6rem 1rem;
@@ -24,9 +22,31 @@
       border-bottom:1px solid var(--grid);
       backdrop-filter:blur(6px) saturate(120%);
     }
-    .brand{font-weight:900; letter-spacing:.4px; font-size:56px; margin:40px auto 0;}
 
-    /* центрированная карта логина */
+    .brand{
+      margin:150px auto 0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    /* логотип того же визуального размера, что прежняя надпись */
+    .brand img{
+      height:150px;       /* высота надписи “КЭМС” */
+      width:auto;
+      display:block;
+
+    }
+    /* адаптация для телефонов */
+    @media (max-width: 640px){
+      .brand{
+        margin:100px auto 0;
+      }
+      .brand img{
+        height:100px;
+      }
+    }
+
     .wrap{width:100%; padding:84px 16px 24px}
     .card{max-width:420px; margin:0 auto; background:var(--card); border:1px solid var(--grid); border-radius:16px; box-shadow:0 8px 28px #0003}
     .card-hd{padding:20px 20px 8px; border-bottom:1px solid var(--grid)}
@@ -50,7 +70,6 @@
     }
     .btn:active{transform:translateY(1px)}
 
-    /* Резерв под сообщение – чтобы ничего не прыгало */
     .msg{
       display:block; text-align:center; margin-top:10px; min-height:20px; font-weight:700;
     }
@@ -60,7 +79,9 @@
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">КЭМС</div>
+  <div class="brand">
+    <img src="logo.png" alt="Логотип КЭМС" />
+  </div>
 </div>
 
 <main class="wrap">
@@ -87,13 +108,12 @@
         </div>
       </form>
 
-      <!-- Сообщение под кнопкой, место зарезервировано заранее -->
       <div class="msg" id="message" role="status" aria-live="polite"></div>
     </div>
   </section>
 </main>
+
 <script>
-  // Автологин: если токен уже есть — сразу в меню
   (function(){
     const token = localStorage.getItem('token');
     if (token) {
@@ -106,7 +126,7 @@
 
   form.addEventListener('submit', async (e)=>{
     e.preventDefault();
-    const username = form.student_id.value.trim(); // используем это поле как username
+    const username = form.student_id.value.trim();
     const password = form.password.value.trim();
 
     if(!username || !password){
@@ -128,7 +148,6 @@
       }
 
       const data = await r.json();
-      // сохраняем токен и роль
       localStorage.setItem('token', data.token);
       localStorage.setItem('role', data.role);
       localStorage.setItem('username', data.username);
