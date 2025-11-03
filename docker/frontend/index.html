@@ -5,83 +5,155 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Вход — КЭМС</title>
   <style>
-    :root{--bg:#6d6d8a;--fg:#fff;--card:#5a5c7a;--card2:#515376;--accent:#7fb3ff;--grid:#ffffff22;--muted:#d0dbff}
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0; display:grid; place-items:center; min-height:100%;
-      background:linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);
-      color:var(--fg);
-      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif
+    :root {
+      --bg:#e5e5e5;
+      --fg:#fff;
+      --card:#7eae63;
+      --grid:#ffffff22;
     }
 
-    .topbar{
-      position:fixed; inset:0 auto auto 0; height:52px; width:100%;
-      display:flex; align-items:center; gap:.5rem; padding:.6rem 1rem;
-      background:linear-gradient(180deg,#515376FF,#6d6d8a);
-      border-bottom:1px solid var(--grid);
-      backdrop-filter:blur(6px) saturate(120%);
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+      background: linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);
+      color: var(--fg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
-    .brand{
-      margin:150px auto 0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
+    /* ---------- ОБЩИЙ СТИЛЬ ---------- */
+    .brand {
+      margin-top: 100px;
+      display: inline-flex; /* под размер содержимого */
+      justify-content: center;
+      align-items: center;
     }
 
-    /* логотип того же визуального размера, что прежняя надпись */
-    .brand img{
-      height:150px;       /* высота надписи “КЭМС” */
-      width:auto;
-      display:block;
-
+    .brand img {
+      height: 150px;
+      width: auto;
+      display: block;
     }
-    /* адаптация для телефонов */
-    @media (max-width: 640px){
-      .brand{
-        margin:100px auto 0;
+
+    .wrap {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 8px 25px #ccc1c1a6;
+      border: 1px solid #ffffffcc;
+      max-width: 420px;
+      width: 100%;
+    }
+
+    .card-hd {
+      padding: 20px 20px 8px;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .title { font-size: 28px; font-weight: 900; margin: 0; }
+    .subtitle { margin: 4px 0 0; opacity: .9; font-weight: 700; }
+
+    .card-bd {
+      padding: 18px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    label { font-weight: 800; opacity: .9; }
+
+    .txt {
+      appearance: none;
+      background: #ffffff12;
+      border: 1px solid #ffffff33;
+      border-radius: 10px;
+      color: #fff;
+      padding: 10px 12px;
+      outline: none;
+      min-height: 42px;
+      width: 100%;
+    }
+
+    .txt::placeholder { color: #d0dbff88; }
+
+    .btn {
+      width: 100%;
+      display: block;
+      margin: 20px auto 0;
+      appearance: none;
+      background: #ffffff22;
+      border: 1px solid #ffffff55;
+      border-radius: 12px;
+      color: #fff;
+      font-weight: 900;
+      letter-spacing: .4px;
+      cursor: pointer;
+      padding: 10px 14px;
+      min-height: 46px;
+    }
+
+    .btn:active { transform: translateY(1px); }
+
+    .msg {
+      display: block;
+      text-align: center;
+      margin-top: 10px;
+      min-height: 20px;
+      font-weight: 700;
+    }
+
+    @media (min-width:640px){
+      .title{font-size:32px;}
+    }
+
+    /* ---------- МОБИЛЬНЫЙ ---------- */
+    @media (max-width: 640px) {
+      html, body {
+        height: 75vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
       }
-      .brand img{
-        height:100px;
+
+      .brand {
+        display: inline-flex; /* ровно по размеру логотипа */
+        margin-top: 8vh;      /* расстояние от верхнего края */
+        margin-bottom: 4vh;   /* небольшой зазор до карточки */
+      }
+
+      .brand img {
+        height: 100px;
+        width: auto;
+      }
+
+      .wrap {
+        flex-grow: 0;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        margin-top: -3vh; /* чуть приподнимаем карточку */
+      }
+
+      .card {
+        margin: 0 auto;
       }
     }
-
-    .wrap{width:100%; padding:84px 16px 24px}
-    .card{max-width:420px; margin:0 auto; background:var(--card); border:1px solid var(--grid); border-radius:16px; box-shadow:0 8px 28px #0003}
-    .card-hd{padding:20px 20px 8px; border-bottom:1px solid var(--grid)}
-    .title{font-size:28px; font-weight:900; margin:0}
-    .subtitle{margin:4px 0 0 0; opacity:.9; font-weight:700}
-    .card-bd{padding:18px 20px 20px; display:flex; flex-direction:column; gap:12px}
-
-    label{font-weight:800; opacity:.9}
-    .txt{
-      appearance:none; background:#ffffff12; border:1px solid #ffffff33;
-      border-radius:10px; color:#fff; padding:10px 12px; outline:none; min-height:42px
-    }
-    .txt::placeholder{color:#d0dbff88}
-    .row{display:flex; flex-direction:column; gap:6px}
-
-    .btn{
-      width:100%; max-width:280px; display:block; margin:0 auto;
-      appearance:none; background:#ffffff22; border:1px solid #ffffff55; border-radius:12px;
-      color:#fff; font-weight:900; letter-spacing:.4px; cursor:pointer;
-      padding:10px 14px; min-height:46px
-    }
-    .btn:active{transform:translateY(1px)}
-
-    .msg{
-      display:block; text-align:center; margin-top:10px; min-height:20px; font-weight:700;
-    }
-
-    @media (min-width:640px){.title{font-size:32px}}
   </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="brand">
-    <img src="pictures/logo.png" alt="Логотип КЭМС" />
-  </div>
+
+<div class="brand">
+  <img id="logo" src="logo.png" alt="Логотип КЭМС" />
 </div>
 
 <main class="wrap">
@@ -103,9 +175,7 @@
           <input class="txt" type="password" id="password" name="password" placeholder="пароль" autocomplete="current-password" required />
         </div>
 
-        <div style="display:flex;justify-content:center;margin-top:20px">
-          <button class="btn" type="submit">Войти</button>
-        </div>
+        <button class="btn" type="submit">Войти</button>
       </form>
 
       <div class="msg" id="message" role="status" aria-live="polite"></div>
@@ -114,13 +184,13 @@
 </main>
 
 <script>
+  // если уже вошёл
   (function(){
     const token = localStorage.getItem('token');
-    if (token) {
-      window.location.href = 'menu.html';
-    }
+    if (token) window.location.href = 'menu.html';
   })();
 
+  // логика входа
   const form = document.getElementById('loginForm');
   const message = document.getElementById('message');
 

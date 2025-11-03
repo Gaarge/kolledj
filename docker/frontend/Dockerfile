@@ -12,6 +12,6 @@ COPY menu.html  ./menu.html
 COPY day-teacher.html ./day-teacher.html
 COPY week-teacher.html ./week-teacher.html
 COPY redact.html   ./redact.html
-
+COPY logo.png ./logo.png
 
 EXPOSE 80
