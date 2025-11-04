@@ -4,3 +4,5 @@ asyncpg
 pydantic
 PyJWT
 httpx
+orjson
+gunicorn

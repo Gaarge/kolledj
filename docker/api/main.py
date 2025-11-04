@@ -7,8 +7,16 @@ import jwt
 from jwt import InvalidTokenError
 from fastapi import FastAPI, HTTPException, Query, Response, Depends, Header
 from pydantic import BaseModel
-
+from fastapi.responses import ORJSONResponse
+from starlette.middleware.gzip import GZipMiddleware
+import hashlib, orjson, time, re
 import httpx
+
+
+_LAT2CYR = str.maketrans("ABCEHKMOPTXYabcehkmoptxy", "АВСЕНКМОРТХУавсенкмортху")
+def normalize_group(s: str) -> str:
+    return re.sub(r'[^0-9a-zа-яё]+', '', (s or "").translate(_LAT2CYR).lower())
+
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_IDS = [x.strip() for x in os.getenv("TELEGRAM_CHAT_IDS","").split(",") if x.strip()]
@@ -30,15 +38,46 @@ async def tg_send(text: str):
 APP_NAME = "schedule-api"
 DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql://user:pass@host:5432/db
 
-JWT_SECRET = os.getenv("SECRET_KEY", "dev-secret-change-me")
+JWT_SECRET = os.getenv("SECRET_KEY")
+if not JWT_SECRET or JWT_SECRET == "dev-secret-change-me":
+    raise RuntimeError("SECRET_KEY is not set for production")
 JWT_ALGO = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_EXPIRES_DAYS = int(os.getenv("JWT_EXPIRES_DAYS", "7"))
+JWT_EXPIRES_DAYS = int(os.getenv("JWT_EXPIRES_DAYS", "3"))  # было 7
 
-app = FastAPI(title=APP_NAME, version="1.5.0")
+
+app = FastAPI(title=APP_NAME, version="1.5.0", default_response_class=ORJSONResponse)
+app.add_middleware(GZipMiddleware, minimum_size=512)
 
 class LoginIn(BaseModel):
     username: str
     password: str
+
+
+
+class TTLCache:
+    def __init__(self, ttl=30, maxsize=10000):
+        self.ttl = ttl
+        self.maxsize = maxsize
+        self.data = {}
+
+    def get(self, key):
+        v = self.data.get(key)
+        if not v: return None
+        ts, val = v
+        if ts + self.ttl < time.time():
+            self.data.pop(key, None); return None
+        return val
+
+    def set(self, key, value):
+        if len(self.data) >= self.maxsize:
+            # простая эвакуация первого попавшегося
+            self.data.pop(next(iter(self.data)))
+        self.data[key] = (time.time(), value)
+
+SCHEDULE_CACHE = TTLCache(ttl=int(os.getenv("CACHE_TTL_SEC","30")))
+LISTS_CACHE = TTLCache(ttl=int(os.getenv("LISTS_TTL_SEC","120")))
+
+
 
 
 class ScheduleItem(BaseModel):
@@ -129,6 +168,19 @@ CREATE INDEX IF NOT EXISTS idx_weekly_group_day_type_pair
   ON weekly_edits (group_name, day_of_week, week_type, pair_number);
 """
 
+_pool: Optional[asyncpg.Pool] = None
+
+async def get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(
+            dsn=DATABASE_URL,
+            min_size=int(os.getenv("PG_POOL_MIN", "5")),
+            max_size=int(os.getenv("PG_POOL_MAX", "50")),
+            command_timeout=float(os.getenv("PG_COMMAND_TIMEOUT", "5.0")),
+        )
+    return _pool
+
 @app.on_event("startup")
 async def _apply_startup_migrations():
     if not RUN_STARTUP_MIGRATIONS:
@@ -139,17 +191,6 @@ async def _apply_startup_migrations():
 
 
 
-_pool: Optional[asyncpg.Pool] = None
-
-async def get_pool() -> asyncpg.Pool:
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(
-            DATABASE_URL,
-            min_size=int(os.getenv("PG_POOL_MIN","5")),
-            max_size=int(os.getenv("PG_POOL_MAX","50"))
-        )
-    return _pool
 
 
 def make_token(payload: dict) -> str:
@@ -296,6 +337,11 @@ async def healthz():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/livez")
+async def livez():
+    return {"status": "ok"}
+
+
 # Функция нормализации строки с именем группы на стороне SQL:
 # 1) lower()
 # 2) translate латинских двойников -> кириллица (A↔А, O↔О, P↔Р, C↔С, E↔Е, X↔Х, H↔Н, K↔К, M↔М, T↔Т, Y↔У)
@@ -343,6 +389,8 @@ async def login(body: LoginIn):
 # ---------- Хелпер: объединение базы и правок для группы+даты ----------
 async def merge_by_group_date(conn: asyncpg.Connection, group: str, d: Date, weekday: int, parity: str) -> List[dict]:
     # База (weekday_schedule)
+    norm_group = normalize_group(group)
+    
     base_rows = await conn.fetch(
         """
         SELECT
@@ -357,25 +405,13 @@ async def merge_by_group_date(conn: asyncpg.Connection, group: str, d: Date, wee
           COALESCE(s.room,'')             AS room,
           COALESCE(s.week_type,'all')     AS week_type
         FROM weekday_schedule s
-        WHERE
-          regexp_replace(
-            lower(translate(s.group_name,
-              'ABCEHKMOPTXYabcehkmoptxy',
-              'АВСЕНКМОРТХУавсенкмортху'
-            )),
-            '[^0-9a-zа-яё]+','', 'g'
-          ) = regexp_replace(
-                lower(translate($1,
-                  'ABCEHKMOPTXYabcehkmoptxy',
-                  'АВСЕНКМОРТХУавсенкмортху'
-                )),
-                '[^0-9a-zа-яё]+','', 'g'
-              )
+        WHERE s.normalized_group_name = $1
           AND s.weekday = $2
           AND (COALESCE(s.week_type,'all') = 'all' OR COALESCE(s.week_type,'all') = $3)
-        ORDER BY s.pair_number ASC
+        ORDER BY s.pair_number
+        
         """,
-        group, weekday, parity
+        norm_group, weekday, parity
     )
 
     # Шаблонные правки (weekly)
@@ -472,18 +508,72 @@ async def get_schedule(
     else:
         parity = 'even' if (d.isocalendar()[1] % 2 == 0) else 'odd'
 
+    cache_key = f"g:{normalize_group(group)}:d:{d.isoformat()}"
+    cached = SCHEDULE_CACHE.get(cache_key)
+    if cached:
+        response.headers['Cache-Control'] = 'public, max-age=30'
+        response.headers['ETag'] = hashlib.sha1(orjson.dumps(cached)).hexdigest()
+        return cached
+    
+    
     pool = await get_pool()
     async with pool.acquire() as conn:
         result = await merge_by_group_date(conn, group, d, weekday, parity)
+    SCHEDULE_CACHE.set(cache_key, result)
+    response.headers['Cache-Control'] = 'public, max-age=30'
+    response.headers['ETag'] = hashlib.sha1(orjson.dumps(result)).hexdigest()
+    
     return result
 
-    
+
+@app.get("/api/week")
+async def get_week(
+    response: Response,
+    current: CurrentUser = Depends(get_current_user),
+    group: str = Query(..., min_length=1, max_length=64),
+    monday: str = Query(..., min_length=10, max_length=10),  # YYYY-MM-DD, понедельник
+):
+    try:
+        d0 = Date.fromisoformat(monday)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'monday'")
+    # определим чётность через якорь, так же как в /api/schedule:
+    anchor_str = os.getenv('ODD_WEEK_ANCHOR')
+    def parity_for(day: Date) -> str:
+        if anchor_str:
+            try:
+                anchor = Date.fromisoformat(anchor_str)
+                delta_days = (day - anchor).days
+                return 'odd' if (delta_days // 7) % 2 == 0 else 'even'
+            except Exception:
+                pass
+        return 'even' if (day.isocalendar()[1] % 2 == 0) else 'odd'
+
+    pool = await get_pool()
+    out = {}
+    async with pool.acquire() as conn:
+        for i in range(7):
+            d = d0 + timedelta(days=i)
+            weekday = d.isoweekday()
+            merged = await merge_by_group_date(conn, group, d, weekday, parity_for(d))
+            out[d.isoformat()] = merged
+
+    response.headers['Cache-Control'] = 'public, max-age=30'
+    return out
+
+
+
 @app.get("/api/groups")
 async def get_groups(current: CurrentUser = Depends(get_current_user)):
+    cached = LISTS_CACHE.get("groups")
+    if cached: return {"groups": cached}
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT DISTINCT group_name FROM weekday_schedule ORDER BY 1;")
-    return {"groups": [r["group_name"] for r in rows]}
+    groups = [r["group_name"] for r in rows]
+    LISTS_CACHE.set("groups", groups)
+    return {"groups": groups}
+
 
 
 # ---------- Дополнения: поддержка расписания для преподавателей ----------
@@ -493,10 +583,14 @@ async def get_teachers(current: CurrentUser = Depends(get_current_user)):
     """
     Вернуть список преподавателей из таблицы расписания.
     """
+    cached = LISTS_CACHE.get("groups")
+    if cached: return {"groups": cached}
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT DISTINCT teacher FROM weekday_schedule WHERE teacher IS NOT NULL AND trim(teacher)<>'' ORDER BY 1;")
-    return {"teachers": [r["teacher"] for r in rows]}
+    teachers = [r["teacher"] for r in rows]
+    LISTS_CACHE.set("teachers", teachers)
+    return {"teachers": teachers}
 
 @app.get("/api/schedule_by_teacher", response_model=List[ScheduleItem])
 async def get_schedule_by_teacher(

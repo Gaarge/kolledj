@@ -165,21 +165,16 @@
     }catch{}
   }
 
-  async function fetchDay(group,date){
-    if(!group) return [];
-    const r=await fetch(`/api/schedule?group=${encodeURIComponent(group)}&date=${iso(date)}`,{
-      cache:'no-store',
+  async function fetchWeek(group, monday){
+    const r = await fetch(`/api/week?group=${encodeURIComponent(group)}&monday=${iso(monday)}`,{
       headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
     });
     if (r.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('role');
-      localStorage.removeItem('username');
-      window.location.href = 'index.html';
-      return [];
+      localStorage.removeItem('token'); localStorage.removeItem('role'); localStorage.removeItem('username');
+      window.location.href = 'index.html'; return {};
     }
-    if(!r.ok) return [];
-    return await r.json();
+    if(!r.ok) return {};
+    return await r.json(); // { "YYYY-MM-DD": [ ... ], ... }
   }
 
   const getSubject = it => {
@@ -212,9 +207,11 @@
     }
 
     if(currentGroup){
-      const data=await Promise.all(days.map(d=>fetchDay(currentGroup,d)));
-      [...grid.children].forEach((box,i)=>{
-        const classes=(data[i]||[]).sort((a,b)=>(a.pair_number??a.pair)-(b.pair_number??b.pair));
+      const weekData = await fetchWeek(currentGroup, weekStart);
+        [...grid.children].forEach((box,i)=>{
+          const d = new Date(weekStart); d.setDate(weekStart.getDate()+i);
+          const key = iso(d);
+          const classes = (weekData[key] || []).sort((a,b)=>(a.pair_number??a.pair)-(b.pair_number??b.pair));
         const list=box.querySelector('.list'); list.innerHTML="";
 
         classes.forEach(it=>{

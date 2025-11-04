@@ -137,6 +137,39 @@ data:
       END IF;
     END$$;
 
+  04_prod_fixes.sql: |
+    ALTER TABLE weekly_edits
+      ALTER COLUMN time_start TYPE TIME USING NULLIF(time_start,'')::time,
+      ALTER COLUMN time_end   TYPE TIME USING NULLIF(time_end,'')::time;
+    
+    ALTER TABLE once_edits
+      ALTER COLUMN time_start TYPE TIME USING NULLIF(time_start,'')::time,
+      ALTER COLUMN time_end   TYPE TIME USING NULLIF(time_end,'')::time;
+    
+    -- 2) уникальные ключи под UPSERT
+    ALTER TABLE weekly_edits
+      ADD CONSTRAINT IF NOT EXISTS uq_weekly UNIQUE (group_name, day_of_week, pair_number, week_type);
+    
+    ALTER TABLE once_edits
+      ADD CONSTRAINT IF NOT EXISTS uq_once UNIQUE (group_name, edit_date, pair_number);
+    
+    -- 3) индексы под выборки по преподавателю
+    CREATE INDEX IF NOT EXISTS idx_weekly_day_type_teacher
+      ON weekly_edits (day_of_week, week_type, (lower(trim(teacher))));
+    
+    CREATE INDEX IF NOT EXISTS idx_once_date_teacher
+      ON once_edits (edit_date, (lower(trim(teacher))));
+    
+    -- 4) отметка обновления для будущих ETag/Last-Modified
+    ALTER TABLE weekly_edits ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+    ALTER TABLE once_edits   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+    CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+    BEGIN NEW.updated_at = now(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS trg_weekly_updated ON weekly_edits;
+    CREATE TRIGGER trg_weekly_updated BEFORE UPDATE ON weekly_edits FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    DROP TRIGGER IF EXISTS trg_once_updated ON once_edits;
+    CREATE TRIGGER trg_once_updated   BEFORE UPDATE ON once_edits   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -150,7 +183,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: gaarge/db:8.2
+        image: gaarge/db:9.1
         ports: [ { containerPort: 5432 } ]
         env:
           - { name: POSTGRES_USER,     value: "schedule_user" }
