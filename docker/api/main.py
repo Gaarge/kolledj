@@ -34,7 +34,7 @@ JWT_SECRET = os.getenv("SECRET_KEY", "dev-secret-change-me")
 JWT_ALGO = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRES_DAYS = int(os.getenv("JWT_EXPIRES_DAYS", "7"))
 
-app = FastAPI(title=APP_NAME, version="1.4.0")
+app = FastAPI(title=APP_NAME, version="1.5.0")
 
 class LoginIn(BaseModel):
     username: str
@@ -167,6 +167,7 @@ class CurrentUser(BaseModel):
     id: int
     username: str
     role: str
+    fio: Optional[str] = None
 
 async def get_current_user(authorization: str = Header(None)) -> CurrentUser:
     if not authorization or not authorization.startswith("Bearer "):
@@ -177,7 +178,12 @@ async def get_current_user(authorization: str = Header(None)) -> CurrentUser:
     except InvalidTokenError:
         # подпись не сошлась / токен протух / формат неверный
         raise HTTPException(status_code=401, detail="Invalid token")
-    return CurrentUser(id=data["id"], username=data["username"], role=data["role"])
+    return CurrentUser(
+        id=data["id"],
+        username=data["username"],
+        role=data["role"],
+        fio=data.get("fio")
+    )
 
 class WeekOverviewItem(BaseModel):
     date: str   # YYYY-MM-DD
@@ -190,6 +196,11 @@ async def week_overview(
     teacher: Optional[str] = Query(None, min_length=1, max_length=128),
     monday: str = Query(..., min_length=10, max_length=10),  # понедельник недели YYYY-MM-DD
 ):
+    # Для преподавателя игнорируем входящий teacher и подставляем его ФИО из токена
+    if current.role == 'teacher':
+        teacher = (current.fio or current.username or "").strip()
+        group = None  # преподавателю недоступен обзор по группе
+
     # Разрешаем РОВНО один из параметров: либо group, либо teacher
     if bool(group) == bool(teacher):
         raise HTTPException(status_code=400, detail="Pass exactly one of 'group' or 'teacher'")
@@ -309,7 +320,7 @@ async def login(body: LoginIn):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, username, role
+            SELECT id, username, role, full_name
             FROM users
             WHERE username = $1
               AND password_hash = crypt($2, password_hash)
@@ -319,8 +330,14 @@ async def login(body: LoginIn):
     if not row:
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
-    token = make_token({"id": row["id"], "username": row["username"], "role": row["role"]})
-    return {"token": token, "role": row["role"], "username": row["username"]}
+    fio = row["full_name"] or row["username"]
+    token = make_token({
+        "id": row["id"],
+        "username": row["username"],
+        "role": row["role"],
+        "fio": fio
+    })
+    return {"token": token, "role": row["role"], "username": row["username"], "fio": fio}
 
 
 # ---------- Хелпер: объединение базы и правок для группы+даты ----------
@@ -485,9 +502,16 @@ async def get_teachers(current: CurrentUser = Depends(get_current_user)):
 async def get_schedule_by_teacher(
     response: Response,
     current: CurrentUser = Depends(get_current_user),
-    teacher: str = Query(..., min_length=1, max_length=128, alias="teacher"),
+    teacher: Optional[str] = Query(None, min_length=1, max_length=128, alias="teacher"),
     date_: str = Query(..., alias="date", min_length=10, max_length=10),  # YYYY-MM-DD
 ):
+    # Для роли teacher всегда используем ФИО из токена и игнорируем входной параметр
+    if current.role == 'teacher':
+        teacher = (current.fio or current.username or "").strip()
+
+    if not teacher:
+        raise HTTPException(status_code=400, detail="Missing 'teacher'")
+
     try:
         d = Date.fromisoformat(date_)
     except ValueError:

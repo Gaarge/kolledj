@@ -221,6 +221,8 @@
       localStorage.setItem('token', data.token);
       localStorage.setItem('role', data.role);
       localStorage.setItem('username', data.username);
+      localStorage.setItem('fio', data.fio || '');
+      
 
       message.textContent = 'Вход выполнен!';
       setTimeout(()=>{ window.location.href='menu.html'; }, 300);

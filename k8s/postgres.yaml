@@ -9,8 +9,87 @@ apiVersion: v1
 kind: ConfigMap
 metadata: { name: pg-init-sql }
 data:
+  00_create_schema.sql: |
+    -- Базовые типы/таблицы, сразу с users.full_name
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
+        CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
+      END IF;
+    END$$;
+
+    CREATE TABLE IF NOT EXISTS once_edits (
+      id           BIGSERIAL PRIMARY KEY,
+      group_name   TEXT NOT NULL,
+      edit_date    DATE NOT NULL,
+      pair_number  INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
+      subject      TEXT,
+      teacher      TEXT,
+      room         TEXT,
+      time_start   TEXT,
+      time_end     TEXT,
+      deleted      BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS idx_once_edits_group_date
+      ON once_edits (group_name, edit_date);
+
+    CREATE TABLE IF NOT EXISTS weekly_edits (
+      id           BIGSERIAL PRIMARY KEY,
+      group_name   TEXT NOT NULL,
+      day_of_week  INTEGER NOT NULL CHECK (day_of_week BETWEEN 1 AND 7),
+      pair_number  INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
+      week_type    week_type_enum NOT NULL DEFAULT 'all',
+      subject      TEXT,
+      teacher      TEXT,
+      room         TEXT,
+      time_start   TEXT,
+      time_end     TEXT,
+      deleted      BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
+      ON weekly_edits (group_name, day_of_week, week_type);
+
+    -- Расширение для bcrypt-хеширования
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+    -- Пользователи приложения (сразу с full_name)
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('student','teacher','admin')),
+      full_name TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_role_fullname
+      ON users (role, lower(full_name));
+
+    -- Нормализованное расписание
+    CREATE TABLE IF NOT EXISTS weekday_schedule (
+      id SERIAL PRIMARY KEY,
+      group_name TEXT NOT NULL,
+      weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+      pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
+      time_start TIME NOT NULL,
+      time_end   TIME NOT NULL,
+      subject    TEXT NOT NULL,
+      teacher    TEXT NOT NULL,
+      room       TEXT NOT NULL,
+      week_type  TEXT NOT NULL CHECK (week_type IN ('all','even','odd'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_ws_group_weekday
+      ON weekday_schedule (group_name, weekday);
+
+    -- ТОЛЬКО тестовые: student/admin. Преподавателей грузим из teachers.xlsx
+    INSERT INTO users (username, password_hash, role, full_name) VALUES
+    ('student1', crypt('studentpass', gen_salt('bf')), 'student', NULL)
+    ON CONFLICT (username) DO NOTHING;
+
+    INSERT INTO users (username, password_hash, role, full_name) VALUES
+    ('admin1', crypt('adminpass', gen_salt('bf')), 'admin', 'Администратор')
+    ON CONFLICT (username) DO NOTHING;
+
   02_add_normalized_column_and_indexes.sql: |
-    -- СОДЕРЖИМОЕ из docker/db/init/02_add_normalized_column_and_indexes.sql
+    -- Индексы/мат.колонка для быстрого поиска
     DO $$
     BEGIN
       IF EXISTS (
@@ -36,7 +115,7 @@ data:
         END IF;
       END IF;
     END$$;
-      
+
     CREATE INDEX IF NOT EXISTS idx_ws_norm_group_weekday_type
       ON weekday_schedule (normalized_group_name, weekday, week_type);
     CREATE INDEX IF NOT EXISTS idx_ws_teacher_day_type
@@ -45,117 +124,19 @@ data:
       ON once_edits (group_name, edit_date, pair_number);
     CREATE INDEX IF NOT EXISTS idx_weekly_group_day_type_pair
       ON weekly_edits (group_name, day_of_week, week_type, pair_number);
-  03_edits_schema.sql: |
-    -- СОДЕРЖИМОЕ из docker/db/init/03_edits_schema.sql
+
+  03_guard_fullname.sql: |
+    -- Страховка: если вдруг users без full_name (старая БД) — добавить
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
     DO $$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
-        CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='users')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='full_name') THEN
+        EXECUTE 'ALTER TABLE users ADD COLUMN full_name TEXT';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_users_role_fullname ON users (role, lower(full_name))';
       END IF;
     END$$;
-    CREATE TABLE IF NOT EXISTS once_edits (
-      id BIGSERIAL PRIMARY KEY,
-      group_name TEXT NOT NULL,
-      edit_date DATE NOT NULL,
-      pair_number INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
-      subject TEXT, teacher TEXT, room TEXT,
-      time_start TEXT, time_end TEXT,
-      deleted BOOLEAN NOT NULL DEFAULT FALSE
-    );
-    CREATE INDEX IF NOT EXISTS idx_once_edits_group_date
-      ON once_edits (group_name, edit_date);
-    CREATE TABLE IF NOT EXISTS weekly_edits (
-      id BIGSERIAL PRIMARY KEY,
-      group_name TEXT NOT NULL,
-      day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 1 AND 7),
-      pair_number INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
-      week_type week_type_enum NOT NULL DEFAULT 'all',
-      subject TEXT, teacher TEXT, room TEXT,
-      time_start TEXT, time_end TEXT,
-      deleted BOOLEAN NOT NULL DEFAULT FALSE
-    );
-    CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
-      ON weekly_edits (group_name, day_of_week, week_type);
-  00_create_schema.sql: |
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'week_type_enum') THEN
-            CREATE TYPE week_type_enum AS ENUM ('all','even','odd');
-          END IF;
-        END$$;
-        CREATE TABLE IF NOT EXISTS once_edits (
-          id           BIGSERIAL PRIMARY KEY,
-          group_name   TEXT NOT NULL,
-          edit_date    DATE NOT NULL,
-          pair_number  INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
-          subject      TEXT,
-          teacher      TEXT,
-          room         TEXT,
-          time_start   TEXT,
-          time_end     TEXT,
-          deleted      BOOLEAN NOT NULL DEFAULT FALSE
-        );
-        CREATE INDEX IF NOT EXISTS idx_once_edits_group_date
-          ON once_edits (group_name, edit_date);
-        
-        CREATE TABLE IF NOT EXISTS weekly_edits (
-          id           BIGSERIAL PRIMARY KEY,
-          group_name   TEXT NOT NULL,
-          day_of_week  INTEGER NOT NULL CHECK (day_of_week BETWEEN 1 AND 7), -- ISO: Пн=1..Вс=7
-          pair_number  INTEGER NOT NULL CHECK (pair_number > 0 AND pair_number <= 20),
-          week_type    week_type_enum NOT NULL DEFAULT 'all',
-          subject      TEXT,
-          teacher      TEXT,
-          room         TEXT,
-          time_start   TEXT,
-          time_end     TEXT,
-          deleted      BOOLEAN NOT NULL DEFAULT FALSE
-        );
-        CREATE INDEX IF NOT EXISTS idx_weekly_edits_group_day
-          ON weekly_edits (group_name, day_of_week, week_type);
-        -- ВАЖНО: этот файл рассчитан на пустую БД (первый старт тома)
-        -- Если БД уже есть, применяй вручную через psql.
-        
-        -- Расширение для bcrypt-хеширования
-        CREATE EXTENSION IF NOT EXISTS pgcrypto;
-        
-        -- Пользователи приложения
-        CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          username TEXT UNIQUE NOT NULL,
-          password_hash TEXT NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('student','teacher','admin'))
-        );
-        
-        -- Нормализованное расписание (то, что реально использует API)
-        CREATE TABLE IF NOT EXISTS weekday_schedule (
-          id SERIAL PRIMARY KEY,
-          group_name TEXT NOT NULL,               -- имя группы, строкой как в Excel
-          weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 1 AND 7), -- Пн=1..Вс=7
-          pair_number SMALLINT NOT NULL CHECK (pair_number BETWEEN 1 AND 20),
-          time_start TIME NOT NULL,
-          time_end   TIME NOT NULL,
-          subject    TEXT NOT NULL,
-          teacher    TEXT NOT NULL,
-          room       TEXT NOT NULL,
-          week_type  TEXT NOT NULL CHECK (week_type IN ('all','even','odd'))
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_ws_group_weekday
-          ON weekday_schedule (group_name, weekday);
-        -- Тестовые учётки (хешируются через pgcrypto/crypt)
-        INSERT INTO users (username, password_hash, role) VALUES
-        ('student1', crypt('studentpass', gen_salt('bf')), 'student')
-        ON CONFLICT (username) DO NOTHING;
-        
-        INSERT INTO users (username, password_hash, role) VALUES
-        ('teacher1', crypt('teacherpass', gen_salt('bf')), 'teacher')
-        ON CONFLICT (username) DO NOTHING;
-        
-        INSERT INTO users (username, password_hash, role) VALUES
-        ('admin1', crypt('adminpass', gen_salt('bf')), 'admin')
-        ON CONFLICT (username) DO NOTHING;
-        
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -169,22 +150,48 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: db
-        image: gaarge/db:5.6
+        image: gaarge/db:8.2
         ports: [ { containerPort: 5432 } ]
         env:
           - { name: POSTGRES_USER,     value: "schedule_user" }
           - { name: POSTGRES_PASSWORD, value: "schedule_pass" }
           - { name: POSTGRES_DB,       value: "schedule_db" }
           - { name: EXCEL_PATH,        value: "/app/excel/schedule.xlsx" }
+          - { name: TEACHERS_EXCEL_PATH, value: "/app/excel/teachers_login.xlsx" }
         volumeMounts:
           - { name: data,     mountPath: /var/lib/postgresql/data }
           - { name: init-sql, mountPath: /docker-entrypoint-initdb.d }
         lifecycle:
           postStart:
             exec:
-               command: ["sh","-lc","set -e; echo '[postStart] waiting for Postgres...'; for i in $(seq 1 60); do pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1 && break; sleep 2; done; pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1; echo \"[postStart] checking $EXCEL_PATH\"; [ -f \"$EXCEL_PATH\" ]; export DATABASE_URL=\"postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}\"; echo '[postStart] importing...'; /opt/venv/bin/python /app/import_from_excel.py; echo '[postStart] import finished'"]
-               
-               
+              command:
+                - sh
+                - -lc
+                - |
+                  set -e
+                  echo '[postStart] waiting for Postgres...'
+                  for i in $(seq 1 60); do
+                    pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 && break
+                    sleep 2
+                  done
+                  pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+                  export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
+
+                  echo "[postStart] checking $EXCEL_PATH"
+                  [ -f "$EXCEL_PATH" ] || { echo "schedule.xlsx not found"; exit 1; }
+
+                  echo '[postStart] importing schedule...'
+                  /opt/venv/bin/python /app/import_from_excel.py
+                  echo '[postStart] schedule import finished'
+
+                  echo "[postStart] checking $TEACHERS_EXCEL_PATH"
+                  if [ -f "$TEACHERS_EXCEL_PATH" ]; then
+                    echo '[postStart] importing teachers...'
+                    /opt/venv/bin/python /app/import_teachers_login.py
+                    echo '[postStart] teachers import finished'
+                  else
+                    echo '[postStart] teachers.xlsx not found, skipping'
+                  fi
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: pgdata }

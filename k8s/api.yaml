@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: gaarge/api:5.7
+        image: gaarge/api:8.2
         ports: [ { containerPort: 8000 } ]
         env:
           # ... что уже есть ...

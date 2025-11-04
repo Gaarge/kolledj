@@ -20,7 +20,7 @@
       border-bottom:1px solid var(--grid);backdrop-filter:blur(6px) saturate(120%)
     }
     .menuBtn{
-      display:inline-flex;align-items:center;gap:.4rem;
+      display:inline-flex;align-items:center;gap:.4рем;
       padding:.38rem .7rem;border-radius:.6rem;text-decoration:none;color:#fff;font-weight:800;
       background:#ffffff18;border:1px solid #ffffff33;white-space:nowrap
     }
@@ -30,13 +30,8 @@
     .tab.sel{background:#ffffff22;opacity:1}
     .grow{flex:1;min-width:.5rem}
     .grp{display:inline-flex;gap:.4rem;align-items:center;min-width:0}
-    input[type="text"]{
-      appearance:none;background:#ffffff12;border:1px solid #ffffff33;border-radius:.6rem;color:#fff;
-      padding:.35rem .6rem;min-width:8rem;outline:none;flex:1;min-width:0
-    }
-    input[type="text"]::placeholder{color:#d0dbff88}
 
-    .wrap{padding:1rem;max-width:1100px;margin:0 auto}
+    .wrap{padding:1rem;max-width:1100px;margin:0 авто}
 
     /* Навигация недели */
     .weeknav{display:flex;align-items:center;gap:.5rem;justify-content:space-between;padding:0 1rem .5rem;flex-wrap:wrap}
@@ -86,7 +81,6 @@
       .tabs{margin-left:-2px}
       .grp{margin-right:-2px}
       .tab{padding:calc(.3rem - 1px) calc(.6rem - 1px)}
-      input[type="text"]{width:100%;min-width:0}
     }
   </style>
 </head>
@@ -101,8 +95,7 @@
     </div>
     <div class="grow"></div>
     <div class="grp">
-      <input id="teacherInput" type="text" placeholder="например, Иванов Иван Иваныч" list="teachersList" />
-      <datalist id="teachersList"></datalist>
+      <strong id="teacherFIO"></strong>
     </div>
   </div>
 </div>
@@ -127,10 +120,9 @@
 
   const grid=document.getElementById('grid');
   const where=document.getElementById('where');
-  const teacherInput=document.getElementById('teacherInput');
-  const teachersList=document.getElementById('teachersList');
   const prevBtn=document.getElementById('prevWeek');
   const nextBtn=document.getElementById('nextWeek');
+  const fioEl=document.getElementById('teacherFIO');
 
   (function(){
     const token = localStorage.getItem('token');
@@ -138,29 +130,15 @@
     if (!token) { window.location.href = 'index.html'; return; }
     if (role !== 'teacher') { window.location.href = 'menu.html'; return; }
     window.__AUTH_TOKEN__ = token;
+
+    const fio = localStorage.getItem('fio') || localStorage.getItem('username') || '';
+    fioEl.textContent = fio;
   })();
 
   let weekStart=mondayOf(new Date());
-  let currentTeacher = localStorage.getItem('teacher') ||"";
 
-  async function fetchTeachersToDatalist(){
-    try{
-      const r=await fetch('/api/teachers',{
-        cache:'no-store',
-        headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
-      });
-      if (r.status === 401) {
-        localStorage.clear(); window.location.href = 'index.html'; return;
-      }
-      if(!r.ok) return;
-      const data=await r.json();
-      const arr=Array.isArray(data)?data:(data.teachers || []);
-      teachersList.innerHTML = arr.map(t => `<option value="${t}"/>`).join('');
-    }catch{}
-  }
-  async function fetchDay(teacher,date){
-    if(!teacher) return [];
-    const r=await fetch(`/api/schedule_by_teacher?teacher=${encodeURIComponent(teacher)}&date=${iso(date)}`,{
+  async function fetchDay(date){
+    const r=await fetch(`/api/schedule_by_teacher?date=${iso(date)}`,{
       cache:'no-store',
       headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
     });
@@ -200,51 +178,39 @@
       box.appendChild(head); box.appendChild(list); grid.appendChild(box);
     }
 
-    if(currentTeacher){
-      const data=await Promise.all(days.map(d=>fetchDay(currentTeacher,d)));
-      [...grid.children].forEach((box,i)=>{
-        const classes=(data[i]||[]).sort((a,b)=>(a.pair_number??a.pair)-(b.pair_number??b.pair));
-        const list=box.querySelector('.list'); list.innerHTML="";
+    const data=await Promise.all(days.map(d=>fetchDay(d)));
+    [...grid.children].forEach((box,i)=>{
+      const classes=(data[i]||[]).sort((a,b)=>(a.pair_number??a.pair)-(b.pair_number??b.pair));
+      const list=box.querySelector('.list'); list.innerHTML="";
 
-        classes.forEach(it=>{
-          const subj=getSubject(it)||"—";
-          const pair=(it.pair_number??it.pair)||"—";
-          const start=it.time_start||"", end=it.time_end||"";
-          const room=getRoom(it)||"—";
-          const teacher=getTeacher(it)||"—";
+      classes.forEach(it=>{
+        const subj=getSubject(it)||"—";
+        const pair=(it.pair_number??it.pair)||"—";
+        const start=it.time_start||"", end=it.time_end||"";
+        const room=getRoom(it)||"—";
+        const teacher=getTeacher(it)||"—";
 
-          const roomLower = room.toString().toLowerCase();
-          const card=document.createElement('div'); card.className='card';
-          card.innerHTML=`
-            <div class="line1">
-              <div class="subj">${subj}</div>
-              <div class="time">${start}${start&&end?'–':''}${end}</div>
-            </div>
-            <div class="meta">
-              <div class="pairNum">${pair}. пара</div>
-              <div class="muted"></div>
-            </div>
-            <div class="divider"></div>
-            <div class="room">${(roomLower==='zoom'||roomLower==='chilla')?'online':'Каб '}${room}</div>
-            <div class="teacher">${teacher}</div>
-          `;
-          list.appendChild(card);
-        });
+        const roomLower = room.toString().toLowerCase();
+        const card=document.createElement('div'); card.className='card';
+        card.innerHTML=`
+          <div class="line1">
+            <div class="subj">${subj}</div>
+            <div class="time">${start}${start&&end?'–':''}${end}</div>
+          </div>
+          <div class="meta">
+            <div class="pairNum">${pair}. пара</div>
+            <div class="muted"></div>
+          </div>
+          <div class="divider"></div>
+          <div class="room">${(roomLower==='zoom'||roomLower==='chilla')?'online':'Каб '}${room}</div>
+          <div class="teacher">${teacher}</div>
+        `;
+        list.appendChild(card);
       });
-    }
+    });
   }
 
   (async()=>{
-    fetchTeachersToDatalist();
-    teacherInput.value = currentTeacher;
-    const applyTeacher = async ()=>{
-      currentTeacher = (teacherInput.value||"").trim();
-      localStorage.setItem('teacher', currentTeacher);
-      await render();
-    };
-    teacherInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyTeacher(); });
-    teacherInput.addEventListener('blur', applyTeacher);
-
     prevBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()-7); weekStart=n; await render(); };
     nextBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()+7); weekStart=n; await render(); };
 

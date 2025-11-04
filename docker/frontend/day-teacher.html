@@ -101,8 +101,7 @@
     </div>
     <div class="grow"></div>
     <div class="grp">
-      <input id="teacherInput" type="text" placeholder="например, Иванов Иван Иваныч" list="teachersList" />
-      <datalist id="teachersList"></datalist>
+      <strong id="teacherFIO"></strong>
     </div>
   </div>
 </div>
@@ -133,10 +132,9 @@
   const weekStripEl=document.getElementById('weekStrip');
   const listEl=document.getElementById('pairsList');
   const where=document.getElementById('where');
-  const teacherInput=document.getElementById('teacherInput');
-  const teachersList = document.getElementById('teachersList');
   const prevBtn=document.getElementById('prevWeek');
   const nextBtn=document.getElementById('nextWeek');
+  const fioEl=document.getElementById('teacherFIO');
 
   (function(){
     const token = localStorage.getItem('token');
@@ -144,30 +142,16 @@
     if (!token) { window.location.href = 'index.html'; return; }
     if (role !== 'teacher') { window.location.href = 'menu.html'; return; }
     window.__AUTH_TOKEN__ = token;
+
+    const fio = localStorage.getItem('fio') || localStorage.getItem('username') || '';
+    fioEl.textContent = fio;
   })();
 
   let selectedDay=new Date();
   let weekStart=mondayOf(selectedDay);
-  let currentTeacher = localStorage.getItem('teacher') ||"";
 
-  async function fetchTeachersToDatalist(){
-    try{
-      const r=await fetch('/api/teachers',{
-        cache:'no-store',
-        headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
-      });
-      if (r.status === 401) {
-        localStorage.clear(); window.location.href = 'index.html'; return; }
-      if(!r.ok) return;
-      const data=await r.json();
-      const arr=Array.isArray(data)?data:(data.teachers || []);
-      teachersList.innerHTML = arr.map(t => `<option value="${t}"/>`).join('');
-    }catch{}
-  }
-
-  async function fetchDay(teacher,date){
-    if(!teacher) return [];
-    const r=await fetch(`/api/schedule_by_teacher?teacher=${encodeURIComponent(teacher)}&date=${iso(date)}` ,{
+  async function fetchDay(date){
+    const r=await fetch(`/api/schedule_by_teacher?date=${iso(date)}` ,{
       cache:'no-store',
       headers: { 'Authorization': 'Bearer ' + window.__AUTH_TOKEN__ }
     });
@@ -182,8 +166,7 @@
     return (candidates[0]||"").toString().trim();
   };
   const getRoom = it => (it.room ?? it.aud ?? it.classroom ?? it['ауд'] ?? "").toString();
-  const getTeacher = it => (it.teacher ?? it.tutor ?? it.lecturer ?? it['преподаватель'] ?? "").toString();
-  // НОВОЕ: берём номер группы из разных возможных полей
+  // Для карточки выводим группу (а не преподавателя)
   const getGroup = it => (it.group ?? it.group_name ?? it.class ?? it.class_name ?? it['группа'] ?? "").toString();
 
   function renderCards(items){
@@ -195,7 +178,7 @@
       const start=it.time_start||"";
       const end=it.time_end||"";
       const room=getRoom(it) || "—";
-      const group=getGroup(it) || "—"; // используем номер группы вместо преподавателя
+      const group=getGroup(it) || "—";
 
       const card=document.createElement('div');
       card.className='card'+(idx%2?' alt':'');
@@ -211,24 +194,21 @@
         </div>
         <div class="divider"></div>
         <div class="room">${(roomLower==='zoom'||roomLower==='chilla')?'online':'Каб '}${room}</div>
-        <div class="group">${group}</div> <!-- раньше тут выводился преподаватель -->
+        <div class="group">${group}</div>
       `;
       listEl.appendChild(card);
     });
   }
 
-  // batch overview
   const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token') || '';
   const authHeaders = () => getToken() ? { 'Authorization': 'Bearer ' + getToken() } : {};
-  function weekOverviewUrl({ group, teacher, mondayISO }) {
+  function weekOverviewUrl({ mondayISO }) {
     const p = new URLSearchParams({ monday: mondayISO });
-    if (group)   p.set('group', group);
-    if (teacher) p.set('teacher', teacher);
     return `/api/week_overview?` + p.toString();
   }
-  async function fetchWeekOverview({ group, teacher, mondayDateObj }) {
+  async function fetchWeekOverview({ mondayDateObj }) {
     const mondayISO = iso(mondayDateObj);
-    const url = weekOverviewUrl({ group, teacher, mondayISO });
+    const url = weekOverviewUrl({ mondayISO });
     const r = await fetch(url, { cache: 'no-store', headers: authHeaders() });
     if (r.status === 401) { localStorage.clear(); location.href='index.html'; return []; }
     if (!r.ok) { console.warn('week_overview error', r.status); return []; }
@@ -242,10 +222,7 @@
     prevBtn.disabled = semWeekIndex(weekStart) <= 1;
     nextBtn.disabled = semWeekIndex(weekStart) >= SEM_WEEKS;
 
-    let overview = [];
-    if (currentTeacher) {
-      overview = await fetchWeekOverview({ group: null, teacher: currentTeacher, mondayDateObj: weekStart });
-    }
+    const overview = await fetchWeekOverview({ mondayDateObj: weekStart });
 
     for(let i=0;i<7;i++){
       const d=new Date(weekStart); d.setDate(weekStart.getDate()+i);
@@ -264,7 +241,7 @@
 
   async function updateDay(){
     await renderWeekStrip();
-    const items = await fetchDay(currentTeacher, selectedDay);
+    const items = await fetchDay(selectedDay);
     renderCards(items);
   }
 
@@ -273,23 +250,12 @@
     if(selectedDay > SEM_END)   selectedDay = new Date(SEM_END);
     weekStart = mondayOf(selectedDay);
 
-    fetchTeachersToDatalist();
-
-    teacherInput.value = currentTeacher;
-    const applyTeacher = async ()=>{
-      currentTeacher=(teacherInput.value||"").trim();
-      localStorage.setItem('teacher',currentTeacher);
-      await updateDay();
-    };
-    teacherInput.addEventListener('keydown', e=>{ if(e.key==='Enter') applyTeacher(); });
-    teacherInput.addEventListener('blur', applyTeacher);
-
     prevBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()-7); if(semWeekIndex(n)>=1){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
     nextBtn.onclick = async ()=>{ const n=new Date(weekStart); n.setDate(weekStart.getDate()+7); if(semWeekIndex(n)<=SEM_WEEKS){ weekStart=n; selectedDay=new Date(weekStart); await updateDay(); } };
 
     await renderWeekStrip();
     renderCards([]);
-    if(currentTeacher) await updateDay();
+    await updateDay();
   })();
 </script>
 </body>

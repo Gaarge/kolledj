@@ -14,4 +14,8 @@ RUN pip install --upgrade pip \
 # Кладём импортёр и Excel
 WORKDIR /app
 COPY import_from_excel.py /app/import_from_excel.py
+COPY import_teachers_login.py /app/import_teachers_login.py
 COPY exel/schedule.xlsx /app/excel/schedule.xlsx
+COPY exel/teachers_login.xlsx /app/excel/teachers_login.xlsx
+
+
