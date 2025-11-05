@@ -214,12 +214,16 @@
         </div>
         <!-- режим сохранения правок -->
         <div style="margin:.6rem 0 .25rem;display:flex;gap:1rem;align-items:center">
-            <strong style="font-size:.9rem">Сохранить как:</strong>
-            <label style="display:inline-flex;gap:.35rem;align-items:center"><input type="radio" name="scope" id="scope_once" checked> разово (на дату)</label>
-            <label style="display:inline-flex;gap:.35rem;align-items:center"><input type="radio" name="scope" id="scope_weekly"> еженедельно (этот день недели)</label>
+            <strong style="font-size:.9rem">Сохранить изменения как:</strong>
+            <label style="display:inline-flex;gap:.35rem;align-items:center">
+                <input type="radio" name="scope" id="scope_once" checked> Разово (на выбранную дату)
+            </label>
+            <label style="display:inline-flex;gap:.35rem;align-items:center">
+                <input type="radio" name="scope" id="scope_weekly"> Еженедельно (этот день недели)
+            </label>
         </div>
         <div class="actions">
-            <button class="btn danger" id="deleteBtn">Очистить пару</button>
+            <button class="btn danger" id="deleteBtn">Удалить пару</button>
             <div style="flex:1"></div>
             <button class="btn" id="cancelBtn">Отмена</button>
             <button class="btn" id="saveBtn">Сохранить</button>
