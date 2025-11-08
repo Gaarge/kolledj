@@ -6,7 +6,6 @@
   <title>Вход — КЭМС</title>
   <style>
     :root {
-      --bg:#e5e5e5;
       --fg:#fff;
       --card:#7eae63;
       --grid:#ffffff22;
@@ -18,12 +17,21 @@
       height: 100%;
       margin: 0;
       font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
-      background: linear-gradient(180deg,#6d6d8a 0%,#6d6d8a 100%);
+
+      /* ✅ Фон заполняет экран, обрезается по правому нижнему углу */
+      background: url('bgindex.jpg') no-repeat right bottom;
+      background-size: cover;
+      background-attachment: fixed;
+
       color: var(--fg);
       display: flex;
       flex-direction: column;
       align-items: center;
     }
+
+
+
+
 
     /* ---------- ОБЩИЙ СТИЛЬ ---------- */
     .brand {
@@ -126,9 +134,9 @@
       }
 
       .brand {
-        display: inline-flex; /* ровно по размеру логотипа */
-        margin-top: 8vh;      /* расстояние от верхнего края */
-        margin-bottom: 4vh;   /* небольшой зазор до карточки */
+        display: inline-flex;
+        margin-top: 8vh;
+        margin-bottom: 4vh;
       }
 
       .brand img {
@@ -141,7 +149,7 @@
         display: flex;
         justify-content: center;
         align-items: flex-start;
-        margin-top: -3vh; /* чуть приподнимаем карточку */
+        margin-top: -3vh;
       }
 
       .card {

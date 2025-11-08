@@ -78,75 +78,24 @@
         /* === адаптив под телефон === */
         @media (max-width: 767px){
             body { font-size: 15px; }
-
-            /* topbar — одна строка: Меню + выбор группы */
-            .topbar {
-                flex-direction: row;
-                align-items: center;
-                gap: .5rem;
-                padding: .6rem .6rem;
-            }
-            .grow { display: none; }      /* чтобы не раздвигал */
-
-            .tabs { flex-shrink: 0; }     /* табс строго вокруг «Меню» */
-
-            .grp {
-                width: auto;              /* вместо 100% */
-                min-width: 0;
-                flex: 1;                  /* занимает остаток строки */
-                justify-content: flex-start;
-                gap: .5rem;
-            }
-            .grp input[type="text"] {
-                min-width: 0;
-                flex: 1;                  /* поле растягивается */
-            }
-
+            .topbar { flex-direction: row; align-items: center; gap: .5rem; padding: .6rem .6rem; }
+            .grow { display: none; }
+            .tabs { flex-shrink: 0; }
+            .grp { width: auto; min-width: 0; flex: 1; justify-content: flex-start; gap: .5rem; }
+            .grp input[type="text"] { min-width: 0; flex: 1; }
             .wrap { padding: .5rem; }
-
-            /* weeknav — стрелки и текст на одной линии */
-            .weeknav {
-                display: flex;
-                flex-direction: row;      /* было column */
-                align-items: center;
-                justify-content: space-between;
-                gap: .4rem;
-                padding: 0 .5rem .5rem;
-            }
-            .where {
-                flex: 1;
-                text-align: center;       /* центрируем между стрелками */
-                font-weight: 800;
-            }
+            .weeknav { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: .4rem; padding: 0 .5rem .5rem; }
+            .where { flex: 1; text-align: center; font-weight: 800; }
             .navbtn { padding: .35rem .55rem; }
-
-            .weekstrip {
-                flex-wrap: nowrap;
-                overflow-x: auto;
-                padding: .35rem .5rem .75rem;
-            }
-
+            .weekstrip { flex-wrap: nowrap; overflow-x: auto; padding: .35rem .5rem .75rem; }
             .d { width: 36px; height: 36px; }
-
             .list { padding: .5rem; gap: .5rem; }
-
             .card { padding: .7rem .8rem; border-radius: 12px; }
-
             .modal { width: 96vw; max-width: none; padding: .8rem; }
-
             .grid { grid-template-columns: 1fr; }
-
             .grid input { font-size: 15px; }
-
-            .editbar {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .btn {
-                width: 100%;
-                text-align: center;
-            }
+            .editbar { flex-direction: column; align-items: stretch; }
+            .btn { width: 100%; text-align: center; }
         }
 
     </style>
@@ -504,9 +453,36 @@
         if(!r.ok){ alert('Ошибка сохранения (разово)'); }
     }
 
+    // === ЕЖЕНЕДЕЛЬНО: окно выбора на русском + маппинг значений ===
     async function saveWeeklyPatch(patch) {
-        let scope = (window.prompt('Применить на недели: all (все) / even (чётные) / odd (нечётные)', 'all') || 'all').toLowerCase();
-        if (!['all','even','odd'].includes(scope)) scope = 'all';
+        // Полностью русское окно и обработка вариантов ввода
+        const answerRaw = (window.prompt(
+            'Применить для каких недель?\n\n' +
+            'Введите один из вариантов: все / чётные / нечётные',
+            'все'
+        ) || 'все').trim().toLowerCase();
+
+        // Нормализуем "ё" -> "е" для удобства
+        const normalize = s => s.replace(/ё/g, 'е');
+
+        const a = normalize(answerRaw);
+
+        let scopeRus;
+        if (a === 'все' || a === 'всё') scopeRus = 'все';
+        else if (a === 'четные' || a === 'чётные') scopeRus = 'чётные';
+        else if (a === 'нечетные' || a === 'нечётные') scopeRus = 'нечётные';
+        else scopeRus = 'все';
+
+        // Маппим на значения API
+        const scopeMap = {
+            'все': 'all',
+            'чётные': 'even',
+            'четные': 'even',     // запасной вариант
+            'нечётные': 'odd',
+            'нечетные': 'odd'     // запасной вариант
+        };
+        const scopeApi = scopeMap[scopeRus] || 'all';
+
         const isoDow = (selectedDay.getDay() === 0 ? 7 : selectedDay.getDay()); // ISO: Пн=1..Вс=7
         const payload = {
             group: (groupInput.value || "").trim(),
@@ -518,8 +494,9 @@
             time_start: patch.time_start || null,
             time_end: patch.time_end || null,
             deleted: !!patch.__deleted,
-            scope
+            scope: scopeApi
         };
+
         const r = await fetch('/api/edits/weekly', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
